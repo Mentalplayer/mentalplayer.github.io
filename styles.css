@@ -1,4 +1,32 @@
-﻿.troubleshoot-button {
+﻿.version-info {
+    margin-top: var(--spacing-xs);
+    font-size: 0.8rem;
+    color: #aaa;
+}/* TURN Status Indicator */
+.turn-status {
+    display: inline-flex;
+    align-items: center;
+    margin-left: var(--spacing-sm);
+}
+
+.turn-indicator {
+    background-color: #4CAF50;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: bold;
+    padding: 2px 5px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+/* TURN enabled status */
+.turn-active .turn-indicator {
+    background-color: #4CAF50;
+}
+
+.turn-inactive .turn-indicator {
+    background-color: #F44336;
+}.troubleshoot-button {
     background: none;
     border: none;
     color: inherit;

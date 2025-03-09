@@ -22,12 +22,29 @@ function addAdditionalEventListeners() {
         elements.manualConnectionModal.style.display = 'flex';
     });
     roomControls.appendChild(manualConnectButton);
+    
+    // Add TURN server status indicator to header
+    const connectionStatus = document.getElementById('connection-status');
+    const turnStatus = document.createElement('div');
+    turnStatus.id = 'turn-status';
+    turnStatus.className = 'turn-status';
+    turnStatus.innerHTML = '<span class="turn-indicator">TURN</span>';
+    connectionStatus.parentNode.insertBefore(turnStatus, connectionStatus.nextSibling);
 }
 
 // Initialize the app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     initApp();
     addAdditionalEventListeners();
+    
+    // Add a version number to the footer
+    const footer = document.querySelector('.main-footer');
+    if (footer) {
+        const versionElem = document.createElement('div');
+        versionElem.className = 'version-info';
+        versionElem.innerHTML = 'v1.2.0 with TURN support';
+        footer.appendChild(versionElem);
+    }
 });/**
  * Mentalplayer - Main Application
  * 
@@ -1022,7 +1039,7 @@ function getCookie(name) {
 /**
  * Initialize PeerJS connection
  */
-function initializePeer() {
+async function initializePeer() {
     updateConnectionStatus('connecting');
     
     // Check if we already have a peer connection
@@ -1037,25 +1054,59 @@ function initializePeer() {
     // Generate a short random ID (8 characters max)
     const peerId = generateRandomId();
     
-    // Create new peer with reliability options
-    AppState.peer = new Peer(peerId, {
-        host: 'peerjs.herokuapp.com',
-        secure: true,
-        port: 443,
-        debug: 2,
-        config: {
-            'iceServers': [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' },
-                { urls: 'stun:stun.stunprotocol.org:3478' },
-                { urls: 'stun:stun.voip.blackberry.com:3478' }
-            ]
-        }
-    });
-    
+    try {
+        // Fetch TURN server credentials from Metered
+        const response = await fetch("https://mentalplayer.metered.live/api/v1/turn/credentials?apiKey=2ea89f5bfe297a1c8b6cf84013f358728e9d");
+        
+        // Get the TURN servers from the response
+        const iceServers = await response.json();
+        
+        // Log success
+        console.log('Successfully fetched TURN server credentials');
+        
+        // Create new peer with TURN server configuration
+        AppState.peer = new Peer(peerId, {
+            host: 'peerjs.herokuapp.com',
+            secure: true,
+            port: 443,
+            debug: 2,
+            config: {
+                'iceServers': iceServers
+            }
+        });
+        
+        setupPeerEventListeners();
+    } catch (error) {
+        console.error('Failed to fetch TURN server credentials:', error);
+        
+        // Fallback to STUN-only configuration
+        console.log('Using fallback STUN servers');
+        AppState.peer = new Peer(peerId, {
+            host: 'peerjs.herokuapp.com',
+            secure: true,
+            port: 443,
+            debug: 2,
+            config: {
+                'iceServers': [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' },
+                    { urls: 'stun:stun.stunprotocol.org:3478' },
+                    { urls: 'stun:stun.voip.blackberry.com:3478' }
+                ]
+            }
+        });
+        
+        setupPeerEventListeners();
+    }
+}
+
+/**
+ * Set up event listeners for the peer connection
+ */
+function setupPeerEventListeners() {
     // Set a timeout for the initial connection
     const peerConnectionTimeout = setTimeout(() => {
         if (!AppState.playerId) {
@@ -1068,7 +1119,7 @@ function initializePeer() {
     AppState.peer.on('open', id => {
         clearTimeout(peerConnectionTimeout);
         AppState.playerId = id;
-        updateConnectionStatus('connected');
+        updateConnectionStatus('connected', 'with TURN support');
         console.log('My peer ID is: ' + id);
         
         // Update manual connection ID display
@@ -1093,16 +1144,12 @@ function initializePeer() {
         
         // Show appropriate error message based on error type
         if (err.type === 'peer-unavailable') {
-            alert('Could not connect to the specified room. The room may not exist or has been closed.');
             showConnectionErrorModal('Could not connect to the specified room. The room may not exist or has been closed.');
         } else if (err.type === 'network' || err.type === 'server-error') {
-            alert('Network or server error. Please check your internet connection and try again.');
             showConnectionErrorModal('Network or server error. Please check your internet connection and try again.');
         } else if (err.type === 'browser-incompatible') {
-            alert('Your browser does not support WebRTC. Please use a modern browser like Chrome, Firefox, or Edge.');
             showConnectionErrorModal('Your browser does not support WebRTC. Please use a modern browser like Chrome, Firefox, or Edge.');
         } else {
-            alert(`Connection error: ${err.message || 'Unknown error'}`);
             showConnectionErrorModal(`Connection error: ${err.message || 'Unknown error'}`);
         }
         
@@ -1138,6 +1185,11 @@ function showConnectionTroubleshooting() {
     // Add browser WebRTC information
     const webrtcInfo = document.querySelector('.webrtc-info');
     if (webrtcInfo) {
+        // Clear any existing dynamic content
+        while (webrtcInfo.children.length > 2) {
+            webrtcInfo.removeChild(webrtcInfo.lastChild);
+        }
+        
         // Add browser information
         const browserInfo = document.createElement('p');
         browserInfo.innerHTML = `Your browser: <strong>${getBrowserInfo()}</strong>`;
@@ -1148,6 +1200,11 @@ function showConnectionTroubleshooting() {
             const supportInfo = document.createElement('p');
             supportInfo.innerHTML = '<span style="color: green;"><i class="fas fa-check-circle"></i> Your browser supports WebRTC</span>';
             webrtcInfo.appendChild(supportInfo);
+            
+            // Add TURN server info
+            const turnInfo = document.createElement('p');
+            turnInfo.innerHTML = '<span style="color: green;"><i class="fas fa-server"></i> TURN relay server activated</span>';
+            webrtcInfo.appendChild(turnInfo);
         } else {
             const supportInfo = document.createElement('p');
             supportInfo.innerHTML = '<span style="color: red;"><i class="fas fa-times-circle"></i> Your browser does NOT support WebRTC</span>';
