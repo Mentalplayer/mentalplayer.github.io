@@ -2228,7 +2228,11 @@ function handlePlayerNameSubmit() {
         elements.entryModal.style.display = 'none';
         updatePlayerDisplay();
         
-        initializePeer();
+        // Generate random ID for this player
+        AppState.playerId = generateRandomId();
+        
+        // Show notification
+        showNotification('Welcome, ' + name + '!', 'Select a game to start playing.', 'success');
     } else {
         alert('Please enter your name to continue.');
     }
