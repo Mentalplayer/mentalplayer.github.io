@@ -64,7 +64,7 @@
                     </div>
                     
                     <div class="room-controls">
-                        <input type="text" id="room-id" placeholder="Room ID">
+                        <input type="text" id="room-id" placeholder="Room ID" maxlength="8">
                         <button id="create-room" class="button primary-button">Create Room</button>
                         <button id="join-room" class="button primary-button">Join Room</button>
                         <button id="invite-players" class="button secondary-button">
@@ -207,8 +207,67 @@
         </div>
     </div>
 
+    <!-- Manual Connection UI -->
+    <div id="manual-connection-ui" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Manual Connection</h2>
+            </div>
+            <div class="modal-body">
+                <p>If automatic connection fails, try connecting manually:</p>
+                <div class="manual-connection-steps">
+                    <div class="connection-step">
+                        <h3>1. Share your ID with your friend</h3>
+                        <div class="connection-id-display">
+                            <span id="my-connection-id">Connecting...</span>
+                            <button id="copy-my-id" class="button primary-button"><i class="fas fa-copy"></i> Copy</button>
+                        </div>
+                    </div>
+                    <div class="connection-step">
+                        <h3>2. Enter your friend's ID</h3>
+                        <div class="friend-id-input">
+                            <input type="text" id="friend-id" placeholder="Enter friend's ID" maxlength="10">
+                            <button id="connect-to-friend" class="button primary-button">Connect</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button id="close-manual-connection" class="modal-button secondary-button">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Connectivity Guide Modal -->
+    <div id="connectivity-guide" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Connection Troubleshooting</h2>
+            </div>
+            <div class="modal-body">
+                <p>If you're having trouble connecting:</p>
+                <ol>
+                    <li>Make sure both users are on modern browsers (Chrome, Firefox, Edge)</li>
+                    <li>Try connecting on the same WiFi network first</li>
+                    <li>If on different networks, use the manual ID connection method</li>
+                    <li>Disable VPNs or firewalls that might block WebRTC</li>
+                    <li>If all else fails, try alternative communication methods like screen sharing your game</li>
+                </ol>
+                
+                <div class="webrtc-info">
+                    <p><i class="fas fa-info-circle"></i> WebRTC connections work best on the same network or with TURN servers</p>
+                    <p>This is a peer-to-peer application without centralized servers</p>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button id="show-manual-connection" class="modal-button primary-button">Try Manual Connection</button>
+                <button id="close-connectivity-guide" class="modal-button secondary-button">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- PeerJS library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     
     <!-- App Scripts -->
     <script src="app.js"></script>

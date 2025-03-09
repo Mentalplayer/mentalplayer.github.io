@@ -1,4 +1,34 @@
 /**
+ * Add additional event listeners after DOM is loaded
+ */
+function addAdditionalEventListeners() {
+    // Manual connection modal
+    document.getElementById('close-manual-connection').addEventListener('click', () => {
+        elements.manualConnectionModal.style.display = 'none';
+    });
+    
+    document.getElementById('show-manual-connection').addEventListener('click', () => {
+        document.getElementById('connectivity-guide').style.display = 'none';
+        elements.manualConnectionModal.style.display = 'flex';
+    });
+    
+    // Add manual connection button to room controls
+    const roomControls = document.querySelector('.room-controls');
+    const manualConnectButton = document.createElement('button');
+    manualConnectButton.id = 'manual-connect-button';
+    manualConnectButton.className = 'button secondary-button';
+    manualConnectButton.innerHTML = '<i class="fas fa-plug"></i> Manual Connect';
+    manualConnectButton.addEventListener('click', () => {
+        elements.manualConnectionModal.style.display = 'flex';
+    });
+    roomControls.appendChild(manualConnectButton);
+}
+
+// Initialize the app when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    initApp();
+    addAdditionalEventListeners();
+});/**
  * Mentalplayer - Main Application
  * 
  * Handles core functionality like player authentication, game selection,
@@ -29,6 +59,7 @@ const elements = {
     inviteLink: document.getElementById('invite-link'),
     copyLinkButton: document.getElementById('copy-link'),
     closeInviteModalButton: document.getElementById('close-invite-modal'),
+    manualConnectionModal: document.getElementById('manual-connection-ui'),
     
     // Navigation & Game Selection
     gameSelect: document.getElementById('game-select'),
@@ -76,9 +107,22 @@ function broadcastToPeers(message) {
 /**
  * Update connection status display
  */
-function updateConnectionStatus(status) {
+function updateConnectionStatus(status, details = '') {
     elements.connectionStatus.className = 'connection-status ' + status;
-    elements.connectionStatus.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    elements.connectionStatus.innerHTML = status.charAt(0).toUpperCase() + status.slice(1);
+    if (details) {
+        elements.connectionStatus.innerHTML += ` <span class="status-details">(${details})</span>`;
+    }
+    
+    // Show troubleshooting if disconnected
+    if (status === 'disconnected' && AppState.roomId) {
+        const troubleshootButton = document.createElement('button');
+        troubleshootButton.className = 'troubleshoot-button';
+        troubleshootButton.innerHTML = '<i class="fas fa-question-circle"></i>';
+        troubleshootButton.title = 'Connection help';
+        troubleshootButton.addEventListener('click', showConnectionTroubleshooting);
+        elements.connectionStatus.appendChild(troubleshootButton);
+    }
 }
 
 /**
@@ -177,9 +221,12 @@ function createRoom() {
         leaveCurrentRoom();
     }
     
-    // Use player ID as room ID for simplicity and uniqueness
-    AppState.roomId = AppState.playerId;
+    // Generate a random room ID - 8 characters max
+    AppState.roomId = generateRandomId();
     AppState.isRoomCreator = true;
+    
+    // Update room ID input to match
+    elements.roomIdInput.value = AppState.roomId;
     
     // Update UI
     updateRoomInfo();
@@ -237,13 +284,16 @@ function joinRoom() {
         return;
     }
     
+    // Limit room ID to 8 characters
+    const trimmedRoomId = inputRoomId.substring(0, 8);
+    
     // Check if trying to join own room
-    if (inputRoomId === AppState.playerId) {
+    if (trimmedRoomId === AppState.playerId) {
         alert('You cannot join your own room this way.');
         return;
     }
     
-    AppState.roomId = inputRoomId;
+    AppState.roomId = trimmedRoomId;
     AppState.isRoomCreator = false;
     
     // Update UI
@@ -819,10 +869,57 @@ function setupEventListeners() {
         if (e.key === 'Enter') elements.sendMessageButton.click();
     });
     
+    // Manual connection
+    document.getElementById('copy-my-id').addEventListener('click', () => {
+        const myId = document.getElementById('my-connection-id').textContent;
+        navigator.clipboard.writeText(myId).then(() => {
+            alert('Your ID has been copied to clipboard!');
+        });
+    });
+    
+    document.getElementById('connect-to-friend').addEventListener('click', () => {
+        const friendId = document.getElementById('friend-id').value.trim();
+        if (friendId) {
+            // Set as room ID and join
+            elements.roomIdInput.value = friendId;
+            joinRoom();
+        } else {
+            alert('Please enter your friend\'s ID');
+        }
+    });
+    
+    // Connection modals
+    document.getElementById('close-connectivity-guide').addEventListener('click', () => {
+        document.getElementById('connectivity-guide').style.display = 'none';
+    });
+    
+    document.getElementById('retry-connection-button').addEventListener('click', () => {
+        document.getElementById('connection-error-modal').style.display = 'none';
+        joinRoom();
+    });
+    
+    document.getElementById('close-connection-error-modal').addEventListener('click', () => {
+        document.getElementById('connection-error-modal').style.display = 'none';
+    });
+    
+    // Game over modal
+    document.getElementById('close-game-over-modal').addEventListener('click', () => {
+        document.getElementById('game-over-modal').style.display = 'none';
+    });
+    
     // Close modals when clicking outside
     window.addEventListener('click', e => {
         if (e.target === elements.inviteModal) {
             elements.inviteModal.style.display = 'none';
+        }
+        if (e.target === document.getElementById('game-over-modal')) {
+            document.getElementById('game-over-modal').style.display = 'none';
+        }
+        if (e.target === document.getElementById('connectivity-guide')) {
+            document.getElementById('connectivity-guide').style.display = 'none';
+        }
+        if (e.target === document.getElementById('connection-error-modal')) {
+            document.getElementById('connection-error-modal').style.display = 'none';
         }
     });
 }
@@ -937,13 +1034,24 @@ function initializePeer() {
         }
     }
     
+    // Generate a short random ID (8 characters max)
+    const peerId = generateRandomId();
+    
     // Create new peer with reliability options
-    AppState.peer = new Peer(null, {
+    AppState.peer = new Peer(peerId, {
+        host: 'peerjs.herokuapp.com',
+        secure: true,
+        port: 443,
         debug: 2,
         config: {
             'iceServers': [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
+                { urls: 'stun:stun.stunprotocol.org:3478' },
+                { urls: 'stun:stun.voip.blackberry.com:3478' }
             ]
         }
     });
@@ -953,6 +1061,7 @@ function initializePeer() {
         if (!AppState.playerId) {
             updateConnectionStatus('disconnected');
             alert('Connection to the PeerJS server timed out. Please check your internet connection and try again.');
+            showConnectionTroubleshooting();
         }
     }, 15000); // 15 second timeout
     
@@ -961,6 +1070,9 @@ function initializePeer() {
         AppState.playerId = id;
         updateConnectionStatus('connected');
         console.log('My peer ID is: ' + id);
+        
+        // Update manual connection ID display
+        document.getElementById('my-connection-id').textContent = id;
         
         // Auto-join room if in URL
         const urlParams = new URLSearchParams(window.location.search);
@@ -982,10 +1094,16 @@ function initializePeer() {
         // Show appropriate error message based on error type
         if (err.type === 'peer-unavailable') {
             alert('Could not connect to the specified room. The room may not exist or has been closed.');
+            showConnectionErrorModal('Could not connect to the specified room. The room may not exist or has been closed.');
         } else if (err.type === 'network' || err.type === 'server-error') {
             alert('Network or server error. Please check your internet connection and try again.');
+            showConnectionErrorModal('Network or server error. Please check your internet connection and try again.');
+        } else if (err.type === 'browser-incompatible') {
+            alert('Your browser does not support WebRTC. Please use a modern browser like Chrome, Firefox, or Edge.');
+            showConnectionErrorModal('Your browser does not support WebRTC. Please use a modern browser like Chrome, Firefox, or Edge.');
         } else {
             alert(`Connection error: ${err.message || 'Unknown error'}`);
+            showConnectionErrorModal(`Connection error: ${err.message || 'Unknown error'}`);
         }
         
         updateConnectionStatus('disconnected');
@@ -1002,6 +1120,70 @@ function initializePeer() {
             }
         }, 3000);
     });
+}
+
+/**
+ * Generate a random ID (8 characters)
+ */
+function generateRandomId() {
+    return Math.random().toString(36).substring(2, 10).toUpperCase();
+}
+
+/**
+ * Show connection troubleshooting modal
+ */
+function showConnectionTroubleshooting() {
+    document.getElementById('connectivity-guide').style.display = 'flex';
+    
+    // Add browser WebRTC information
+    const webrtcInfo = document.querySelector('.webrtc-info');
+    if (webrtcInfo) {
+        // Add browser information
+        const browserInfo = document.createElement('p');
+        browserInfo.innerHTML = `Your browser: <strong>${getBrowserInfo()}</strong>`;
+        webrtcInfo.appendChild(browserInfo);
+        
+        // Add WebRTC support test
+        if (window.RTCPeerConnection) {
+            const supportInfo = document.createElement('p');
+            supportInfo.innerHTML = '<span style="color: green;"><i class="fas fa-check-circle"></i> Your browser supports WebRTC</span>';
+            webrtcInfo.appendChild(supportInfo);
+        } else {
+            const supportInfo = document.createElement('p');
+            supportInfo.innerHTML = '<span style="color: red;"><i class="fas fa-times-circle"></i> Your browser does NOT support WebRTC</span>';
+            webrtcInfo.appendChild(supportInfo);
+        }
+    }
+}
+
+/**
+ * Get browser information
+ */
+function getBrowserInfo() {
+    const userAgent = navigator.userAgent;
+    let browserName = "Unknown";
+    
+    if (userAgent.match(/chrome|chromium|crios/i)) {
+        browserName = "Chrome";
+    } else if (userAgent.match(/firefox|fxios/i)) {
+        browserName = "Firefox";
+    } else if (userAgent.match(/safari/i)) {
+        browserName = "Safari";
+    } else if (userAgent.match(/opr\//i)) {
+        browserName = "Opera";
+    } else if (userAgent.match(/edg/i)) {
+        browserName = "Edge";
+    }
+    
+    return browserName;
+}
+
+/**
+ * Show connection error modal
+ */
+function showConnectionErrorModal(message) {
+    document.getElementById('connection-error-message').textContent = message || 'There was a problem connecting to the room.';
+    document.getElementById('connection-error-modal').style.display = 'flex';
 }
 
 /**
