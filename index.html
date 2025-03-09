@@ -42,6 +42,62 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        /* Critical styles for the entry modal */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            width: 90%;
+            max-width: 500px;
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .modal-logo {
+            font-size: 2rem;
+            color: #4a6fa5;
+            margin-right: 15px;
+        }
+        .modal-body {
+            margin: 15px 0;
+        }
+        .modal-body input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+        }
+        .primary-button {
+            background-color: #4a6fa5;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .primary-button:hover {
+            background-color: #3a5982;
+        }
     </style>
 </head>
 <body>
@@ -168,8 +224,7 @@
             </div>
         </footer>
     </div>
-    </div>
-    
+
     <!-- Name Entry Modal -->
     <div id="entry-modal" class="modal" style="display: flex;">
         <div class="modal-content">
@@ -182,7 +237,7 @@
                 <input type="text" id="player-name-input" placeholder="Your Name" maxlength="20">
             </div>
             <div class="modal-buttons">
-                <button id="continue-button" class="modal-button primary-button">Continue</button>
+                <button id="continue-button" class="primary-button">Continue</button>
             </div>
         </div>
     </div>
@@ -251,7 +306,7 @@
             </div>
         </div>
     </div>
-
+    
     <!-- Manual Connection UI -->
     <div id="manual-connection-ui" class="modal">
         <div class="modal-content">
@@ -293,14 +348,14 @@
                 <p>If you're having trouble connecting:</p>
                 <ol>
                     <li>Make sure both users are on modern browsers (Chrome, Firefox, Edge)</li>
-                    <li>Wait a moment for the TURN server connection to establish</li>
+                    <li>Wait a moment for the WebRTC connection to establish</li>
                     <li>If on different networks, connections may take longer to establish</li>
                     <li>Disable VPNs or firewalls that might block WebRTC</li>
                     <li>If all else fails, try the manual connection option</li>
                 </ol>
                 
                 <div class="webrtc-info">
-                    <p><i class="fas fa-info-circle"></i> This app uses TURN servers to help establish connections across networks</p>
+                    <p><i class="fas fa-info-circle"></i> This app uses WebRTC to establish direct peer-to-peer connections</p>
                     <p>Please be patient while connections are set up</p>
                 </div>
             </div>
@@ -310,12 +365,51 @@
             </div>
         </div>
     </div>
-
-    <!-- PeerJS library -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     
     <!-- App Scripts -->
-    <script src="app.js"></script>
-    <script src="minesweeper.js"></script>
+    <script src="./app.js"></script>
+    <script src="./minesweeper.js"></script>
+
+    <script>
+        // Ensure continue button works
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if continue button works directly
+            const continueButton = document.getElementById('continue-button');
+            const playerNameInput = document.getElementById('player-name-input');
+            const entryModal = document.getElementById('entry-modal');
+            
+            if (continueButton) {
+                continueButton.addEventListener('click', function() {
+                    const name = playerNameInput.value.trim();
+                    if (name) {
+                        // Store name in local storage
+                        localStorage.setItem('playerName', name);
+                        
+                        // Hide modal
+                        entryModal.style.display = 'none';
+                        
+                        // Update display
+                        document.getElementById('player-display').textContent = name;
+                        
+                        // Show a welcome message
+                        alert('Welcome, ' + name + '! Select a game to start playing.');
+                    } else {
+                        alert('Please enter your name to continue.');
+                    }
+                });
+            }
+            
+            // Check for CSS loading issues
+            const bodyBg = window.getComputedStyle(document.body).backgroundColor;
+            if (bodyBg === 'rgba(0, 0, 0, 0)' || !bodyBg) {
+                document.getElementById('css-loading-error').style.display = 'flex';
+            }
+            
+            // Add reload button functionality
+            document.getElementById('reload-page').addEventListener('click', function() {
+                window.location.reload(true);
+            });
+        });
+    </script>
 </body>
 </html>
