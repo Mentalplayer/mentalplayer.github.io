@@ -1,4 +1,100 @@
 /**
+ * Show network information for troubleshooting
+ */
+async function showNetworkInfo() {
+    // Create modal if it doesn't exist
+    let networkModal = document.getElementById('network-info-modal');
+    
+    if (!networkModal) {
+        networkModal = document.createElement('div');
+        networkModal.id = 'network-info-modal';
+        networkModal.className = 'modal';
+        
+        // Create modal content
+        networkModal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Network Information</h2>
+                </div>
+                <div class="modal-body" id="network-info-content">
+                    <div class="loading-container">
+                        <div class="loading-spinner"></div>
+                        <p>Collecting network information...</p>
+                    </div>
+                </div>
+                <div class="modal-buttons">
+                    <button id="close-network-info" class="modal-button secondary-button">Close</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(networkModal);
+        
+        // Add close button event
+        document.getElementById('close-network-info').addEventListener('click', () => {
+            networkModal.style.display = 'none';
+        });
+        
+        // Close when clicking outside
+        networkModal.addEventListener('click', (e) => {
+            if (e.target === networkModal) {
+                networkModal.style.display = 'none';
+            }
+        });
+    }
+    
+    // Show the modal
+    networkModal.style.display = 'flex';
+    
+    // Get network info content area
+    const networkContent = document.getElementById('network-info-content');
+    
+    // Start gathering network info
+    try {
+        // Get connection info
+        let networkInfo = '';
+        
+        // Get browser info
+        networkInfo += `<h3>Browser</h3>`;
+        networkInfo += `<p>Browser: ${getBrowserInfo()}</p>`;
+        networkInfo += `<p>User Agent: ${navigator.userAgent}</p>`;
+        
+        // Get basic connection info
+        networkInfo += `<h3>Connection</h3>`;
+        
+        if (navigator.connection) {
+            networkInfo += `<p>Type: ${navigator.connection.type || 'unknown'}</p>`;
+            networkInfo += `<p>Effective Type: ${navigator.connection.effectiveType || 'unknown'}</p>`;
+            networkInfo += `<p>Downlink: ${navigator.connection.downlink || 'unknown'} Mbps</p>`;
+            networkInfo += `<p>RTT: ${navigator.connection.rtt || 'unknown'} ms</p>`;
+        } else {
+            networkInfo += `<p>Connection API not available</p>`;
+        }
+        
+        // Get IP information
+        networkInfo += `<h3>IP Information</h3>`;
+        
+        try {
+            const ipResponse = await fetch('https://api.ipify.org?format=json');
+            const ipData = await ipResponse.json();
+            networkInfo += `<p>Public IP: ${ipData.ip}</p>`;
+        } catch (error) {
+            networkInfo += `<p>Could not determine public IP: ${error.message}</p>`;
+        }
+        
+        // WebRTC information
+        networkInfo += `<h3>WebRTC</h3>`;
+        networkInfo += `<p>PeerJS ID: ${AppState.playerId || 'Not connected'}</p>`;
+        networkInfo += `<p>Connected Peers: ${Object.keys(AppState.peers).length}</p>`;
+        networkInfo += `<p>TURN Status: ${document.getElementById('turn-status').className.includes('active') ? 'Active' : 'Inactive'}</p>`;
+        
+        // Update the content
+        networkContent.innerHTML = networkInfo;
+        
+    } catch (error) {
+        networkContent.innerHTML = `<p>Error collecting network information: ${error.message}</p>`;
+    }
+}/**
  * Add additional event listeners after DOM is loaded
  */
 function addAdditionalEventListeners() {
@@ -30,6 +126,28 @@ function addAdditionalEventListeners() {
     turnStatus.className = 'turn-status';
     turnStatus.innerHTML = '<span class="turn-indicator">TURN</span>';
     connectionStatus.parentNode.insertBefore(turnStatus, connectionStatus.nextSibling);
+    
+    // Add troubleshooting button to error modal
+    document.getElementById('show-troubleshooting').addEventListener('click', () => {
+        document.getElementById('connection-error-modal').style.display = 'none';
+        showConnectionTroubleshooting();
+    });
+    
+    // Add network info link to troubleshooting
+    const webrtcInfo = document.querySelector('.webrtc-info');
+    if (webrtcInfo) {
+        const networkInfoButton = document.createElement('button');
+        networkInfoButton.id = 'network-info-button';
+        networkInfoButton.className = 'button secondary-button';
+        networkInfoButton.innerHTML = '<i class="fas fa-network-wired"></i> Network Details';
+        networkInfoButton.addEventListener('click', showNetworkInfo);
+        
+        const networkInfoContainer = document.createElement('div');
+        networkInfoContainer.className = 'network-info-container';
+        networkInfoContainer.appendChild(networkInfoButton);
+        
+        webrtcInfo.appendChild(networkInfoContainer);
+    }
 }
 
 // Initialize the app when DOM is loaded
@@ -42,9 +160,21 @@ document.addEventListener('DOMContentLoaded', () => {
     if (footer) {
         const versionElem = document.createElement('div');
         versionElem.className = 'version-info';
-        versionElem.innerHTML = 'v1.2.0 with TURN support';
+        versionElem.innerHTML = 'v1.3.0 with enhanced connection reliability';
         footer.appendChild(versionElem);
     }
+    
+    // Add notification container
+    const notificationContainer = document.createElement('div');
+    notificationContainer.id = 'notification-container';
+    document.body.appendChild(notificationContainer);
+    
+    // Show a welcome notification with connection tips
+    setTimeout(() => {
+        showNotification('Welcome to Mentalplayer', 
+                        'For best results, allow some time for connections to establish.', 
+                        'info');
+    }, 3000);
 });/**
  * Mentalplayer - Main Application
  * 
@@ -113,11 +243,21 @@ function initApp() {
 }
 
 /**
- * Send message to all connected peers
+ * Broadcast message to all connected peers
  */
 function broadcastToPeers(message) {
+    // Log the broadcast
+    console.log('Broadcasting message:', message.type);
+    
+    // Use a delay to stagger messages and avoid network congestion
+    let delay = 0;
+    const increment = 50; // milliseconds between each send
+    
     Object.values(AppState.peers).forEach(conn => {
-        conn.send(message);
+        setTimeout(() => {
+            sendWithRetry(conn, message);
+        }, delay);
+        delay += increment;
     });
 }
 
@@ -126,9 +266,22 @@ function broadcastToPeers(message) {
  */
 function updateConnectionStatus(status, details = '') {
     elements.connectionStatus.className = 'connection-status ' + status;
-    elements.connectionStatus.innerHTML = status.charAt(0).toUpperCase() + status.slice(1);
+    
+    let statusText = status.charAt(0).toUpperCase() + status.slice(1);
     if (details) {
-        elements.connectionStatus.innerHTML += ` <span class="status-details">(${details})</span>`;
+        statusText += ` <span class="status-details">(${details})</span>`;
+    }
+    
+    elements.connectionStatus.innerHTML = statusText;
+    
+    // Update TURN status based on connection status
+    const turnStatus = document.getElementById('turn-status');
+    if (turnStatus) {
+        if (status === 'connected') {
+            turnStatus.className = 'turn-status turn-active';
+        } else {
+            turnStatus.className = 'turn-status turn-inactive';
+        }
     }
     
     // Show troubleshooting if disconnected
@@ -140,6 +293,9 @@ function updateConnectionStatus(status, details = '') {
         troubleshootButton.addEventListener('click', showConnectionTroubleshooting);
         elements.connectionStatus.appendChild(troubleshootButton);
     }
+    
+    // Log status change
+    console.log(`Connection status: ${status}${details ? ' (' + details + ')' : ''}`);
 }
 
 /**
@@ -389,25 +545,98 @@ function handlePeerDisconnection(peerId) {
     // Check if this was the room creator
     const wasRoomCreator = peerId === AppState.roomId;
     
-    // Update UI
-    delete AppState.peers[peerId];
+    // Check if peer exists to avoid duplicated handling
+    if (!AppState.peers[peerId]) {
+        console.log('Peer already disconnected or not in peer list:', peerId);
+        return;
+    }
     
+    // Try to close the connection if still open
+    try {
+        if (AppState.peers[peerId] && AppState.peers[peerId].open) {
+            AppState.peers[peerId].close();
+        }
+    } catch (e) {
+        console.log('Error closing peer connection:', e);
+    }
+    
+    // Update UI
     const disconnectedPlayerName = AppState.players[peerId]?.name || 'A player';
+    
+    // Remove from peers and players
+    delete AppState.peers[peerId];
     delete AppState.players[peerId];
     
+    // Update player list and connection status
     updatePlayersList();
-    updateConnectionStatus(Object.keys(AppState.peers).length > 0 ? 'connected' : 'disconnected');
+    const connectedPeers = Object.keys(AppState.peers).length;
+    updateConnectionStatus(connectedPeers > 0 ? 'connected' : 'disconnected', 
+                         connectedPeers > 0 ? `${connectedPeers} peer(s)` : 'no peers');
     
     // Notify user
     addChatMessage('system', `${disconnectedPlayerName} has disconnected.`);
     
     // If room creator disconnected, notify and consider leaving room
-    if (wasRoomCreator) {
+    if (wasRoomCreator && !AppState.isRoomCreator) {
         addChatMessage('system', 'The room creator has disconnected. The game may not function properly.');
         
-        if (confirm('The room creator has disconnected. Would you like to return to the game selection?')) {
-            returnToGameSelection();
-        }
+        // Show a notification but don't force disconnect
+        showNotification('Room creator disconnected', 
+                         'The room creator has disconnected. You may continue playing, but some functionality might be limited.',
+                         'warning');
+    }
+}
+
+/**
+ * Show a notification
+ */
+function showNotification(title, message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    
+    // Set content
+    notification.innerHTML = `
+        <div class="notification-header">
+            <span class="notification-title">${title}</span>
+            <button class="notification-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="notification-body">
+            <p>${message}</p>
+        </div>
+    `;
+    
+    // Add notification to the page
+    const notificationContainer = document.getElementById('notification-container');
+    
+    if (!notificationContainer) {
+        // Create container if it doesn't exist
+        const container = document.createElement('div');
+        container.id = 'notification-container';
+        document.body.appendChild(container);
+        container.appendChild(notification);
+    } else {
+        notificationContainer.appendChild(notification);
+    }
+    
+    // Add close functionality
+    notification.querySelector('.notification-close').addEventListener('click', () => {
+        notification.classList.add('notification-hiding');
+        setTimeout(() => {
+            notification.remove();
+        }, 300);
+    });
+    
+    // Auto-hide after 10 seconds for non-error notifications
+    if (type !== 'error') {
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.classList.add('notification-hiding');
+                setTimeout(() => {
+                    notification.remove();
+                }, 300);
+            }
+        }, 10000);
     }
 }
 
@@ -1040,66 +1269,77 @@ function getCookie(name) {
  * Initialize PeerJS connection
  */
 async function initializePeer() {
-    updateConnectionStatus('connecting');
-    
-    // Check if we already have a peer connection
-    if (AppState.peer) {
-        try {
-            AppState.peer.destroy();
-        } catch (e) {
-            console.log('Error destroying previous peer connection:', e);
-        }
-    }
-    
-    // Generate a short random ID (8 characters max)
-    const peerId = generateRandomId();
-    
     try {
-        // Fetch TURN server credentials from Metered
-        const response = await fetch("https://mentalplayer.metered.live/api/v1/turn/credentials?apiKey=2ea89f5bfe297a1c8b6cf84013f358728e9d");
+        updateConnectionStatus('connecting');
         
-        // Get the TURN servers from the response
-        const iceServers = await response.json();
+        // Check if we already have a peer connection
+        if (AppState.peer) {
+            try {
+                AppState.peer.destroy();
+            } catch (e) {
+                console.log('Error destroying previous peer connection:', e);
+            }
+        }
         
-        // Log success
-        console.log('Successfully fetched TURN server credentials');
+        // Generate a short random ID (8 characters max)
+        const peerId = generateRandomId();
         
-        // Create new peer with TURN server configuration
+        // Default ICE servers (STUN only)
+        let iceServers = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' },
+            { urls: 'stun:stun.stunprotocol.org:3478' },
+            { urls: 'stun:stun.voip.blackberry.com:3478' }
+        ];
+        
+        // Try to fetch TURN server credentials
+        try {
+            const response = await fetch("https://mentalplayer.metered.live/api/v1/turn/credentials?apiKey=2ea89f5bfe297a1c8b6cf84013f358728e9d");
+            
+            // Only use the response if it's successful
+            if (response.ok) {
+                const turnServers = await response.json();
+                if (Array.isArray(turnServers) && turnServers.length > 0) {
+                    console.log('Successfully fetched TURN server credentials');
+                    iceServers = turnServers;
+                    
+                    // Update TURN status indicator
+                    const turnStatus = document.getElementById('turn-status');
+                    if (turnStatus) {
+                        turnStatus.className = 'turn-status turn-active';
+                    }
+                } else {
+                    console.warn('TURN server response invalid:', turnServers);
+                }
+            } else {
+                console.warn('TURN server fetch failed with status:', response.status);
+            }
+        } catch (error) {
+            console.error('Error fetching TURN server credentials:', error);
+        }
+        
+        // Create PeerJS instance with ice servers
         AppState.peer = new Peer(peerId, {
-            host: 'peerjs.herokuapp.com',
             secure: true,
+            host: 'peerjs.herokuapp.com',
             port: 443,
-            debug: 2,
+            debug: 1, // Reduce debug level to avoid console spam
             config: {
-                'iceServers': iceServers
+                iceServers: iceServers,
+                sdpSemantics: 'unified-plan', // Add explicit SDP semantics
+                iceCandidatePoolSize: 10 // Increase candidate pool for better connectivity
             }
         });
         
         setupPeerEventListeners();
+        
     } catch (error) {
-        console.error('Failed to fetch TURN server credentials:', error);
-        
-        // Fallback to STUN-only configuration
-        console.log('Using fallback STUN servers');
-        AppState.peer = new Peer(peerId, {
-            host: 'peerjs.herokuapp.com',
-            secure: true,
-            port: 443,
-            debug: 2,
-            config: {
-                'iceServers': [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' },
-                    { urls: 'stun:stun3.l.google.com:19302' },
-                    { urls: 'stun:stun4.l.google.com:19302' },
-                    { urls: 'stun:stun.stunprotocol.org:3478' },
-                    { urls: 'stun:stun.voip.blackberry.com:3478' }
-                ]
-            }
-        });
-        
-        setupPeerEventListeners();
+        console.error('Error initializing peer:', error);
+        updateConnectionStatus('disconnected', 'initialization failed');
+        alert('Failed to initialize connection system. Please refresh the page and try again.');
     }
 }
 
@@ -1111,15 +1351,17 @@ function setupPeerEventListeners() {
     const peerConnectionTimeout = setTimeout(() => {
         if (!AppState.playerId) {
             updateConnectionStatus('disconnected');
-            alert('Connection to the PeerJS server timed out. Please check your internet connection and try again.');
-            showConnectionTroubleshooting();
+            console.error('Connection to the PeerJS server timed out');
+            
+            // Try alternative PeerJS server
+            tryAlternativePeerServer();
         }
-    }, 15000); // 15 second timeout
+    }, 20000); // 20 second timeout - increased for reliability
     
     AppState.peer.on('open', id => {
         clearTimeout(peerConnectionTimeout);
         AppState.playerId = id;
-        updateConnectionStatus('connected', 'with TURN support');
+        updateConnectionStatus('connected', 'ready');
         console.log('My peer ID is: ' + id);
         
         // Update manual connection ID display
@@ -1130,11 +1372,12 @@ function setupPeerEventListeners() {
         const roomParam = urlParams.get('room');
         if (roomParam) {
             elements.roomIdInput.value = roomParam;
-            joinRoom();
+            setTimeout(() => joinRoom(), 1000); // Delay to ensure peer is fully ready
         }
     });
     
     AppState.peer.on('connection', conn => {
+        console.log('Received connection from peer:', conn.peer);
         handleConnection(conn);
     });
     
@@ -1142,30 +1385,112 @@ function setupPeerEventListeners() {
         clearTimeout(peerConnectionTimeout);
         console.error('PeerJS error:', err);
         
-        // Show appropriate error message based on error type
+        // Handle specific error types
         if (err.type === 'peer-unavailable') {
+            console.log('Peer unavailable');
+            updateConnectionStatus('disconnected', 'peer not found');
             showConnectionErrorModal('Could not connect to the specified room. The room may not exist or has been closed.');
-        } else if (err.type === 'network' || err.type === 'server-error') {
-            showConnectionErrorModal('Network or server error. Please check your internet connection and try again.');
+        } else if (err.type === 'network' || err.type === 'socket-error') {
+            console.log('Network or socket error');
+            updateConnectionStatus('disconnected', 'network error');
+            showConnectionErrorModal('Network error. Please check your internet connection and try again.');
+        } else if (err.type === 'server-error') {
+            console.log('Server error - will try alternative server');
+            updateConnectionStatus('disconnected', 'server error');
+            tryAlternativePeerServer();
         } else if (err.type === 'browser-incompatible') {
+            console.log('Browser incompatible');
+            updateConnectionStatus('disconnected', 'browser incompatible');
             showConnectionErrorModal('Your browser does not support WebRTC. Please use a modern browser like Chrome, Firefox, or Edge.');
         } else {
+            console.log('Other PeerJS error:', err.type);
+            updateConnectionStatus('disconnected', err.type || 'unknown error');
             showConnectionErrorModal(`Connection error: ${err.message || 'Unknown error'}`);
         }
-        
-        updateConnectionStatus('disconnected');
     });
     
     AppState.peer.on('disconnected', () => {
-        updateConnectionStatus('disconnected');
+        updateConnectionStatus('disconnected', 'lost connection');
         console.log('Peer disconnected');
         
         // Try to reconnect
         setTimeout(() => {
             if (AppState.peer) {
-                AppState.peer.reconnect();
+                console.log('Attempting to reconnect...');
+                try {
+                    AppState.peer.reconnect();
+                } catch (e) {
+                    console.error('Reconnection failed:', e);
+                    // If reconnection fails, try alternative server
+                    tryAlternativePeerServer();
+                }
             }
         }, 3000);
+    });
+}
+
+/**
+ * Try an alternative PeerJS server if the primary one fails
+ */
+function tryAlternativePeerServer() {
+    console.log('Trying alternative PeerJS server...');
+    updateConnectionStatus('connecting', 'alternative server');
+    
+    // Back up existing state
+    const currentRoomId = AppState.roomId;
+    const isRoomCreator = AppState.isRoomCreator;
+    
+    // Generate a new random ID (8 characters max)
+    const peerId = generateRandomId();
+    
+    // Clean up existing peer
+    if (AppState.peer) {
+        try {
+            AppState.peer.destroy();
+        } catch (e) {
+            console.log('Error destroying previous peer connection:', e);
+        }
+    }
+    
+    // Try with a different free PeerJS server (0.peerjs.com)
+    AppState.peer = new Peer(peerId, {
+        host: '0.peerjs.com',
+        secure: true,
+        port: 443,
+        debug: 1,
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        }
+    });
+    
+    // Restore state when connected
+    AppState.peer.on('open', id => {
+        AppState.playerId = id;
+        updateConnectionStatus('connected', 'alternative server');
+        console.log('Connected to alternative server. My peer ID is: ' + id);
+        
+        // Update manual connection ID display
+        document.getElementById('my-connection-id').textContent = id;
+        
+        // Restore room if was in one
+        if (currentRoomId) {
+            // If was room creator, create a new room
+            if (isRoomCreator) {
+                setTimeout(() => createRoom(), 1000);
+            }
+        }
+    });
+    
+    // Set other event listeners
+    AppState.peer.on('connection', handleConnection);
+    
+    AppState.peer.on('error', err => {
+        console.error('Alternative server error:', err);
+        updateConnectionStatus('disconnected', 'all servers failed');
+        showConnectionErrorModal('All connection servers failed. Please try again later or use manual connection.');
     });
 }
 
@@ -1239,8 +1564,32 @@ function getBrowserInfo() {
  * Show connection error modal
  */
 function showConnectionErrorModal(message) {
-    document.getElementById('connection-error-message').textContent = message || 'There was a problem connecting to the room.';
-    document.getElementById('connection-error-modal').style.display = 'flex';
+    const errorModal = document.getElementById('connection-error-modal');
+    const errorMessage = document.getElementById('connection-error-message');
+    
+    if (errorModal && errorMessage) {
+        // Check if modal is already showing (to prevent stacking errors)
+        if (errorModal.style.display === 'flex') {
+            console.log('Error modal already showing, updating message');
+            errorMessage.textContent = message || 'There was a problem connecting to the room.';
+            return;
+        }
+        
+        // Set the error message
+        errorMessage.textContent = message || 'There was a problem connecting to the room.';
+        
+        // Show the error modal
+        errorModal.style.display = 'flex';
+        
+        // Auto-hide after some time
+        setTimeout(() => {
+            errorModal.style.display = 'none';
+        }, 8000);
+    } else {
+        // Fallback if modal elements not found
+        console.error('Error modal elements not found, using alert instead');
+        alert(message || 'There was a problem connecting to the room.');
+    }
 }
 
 /**
@@ -1251,12 +1600,14 @@ function handleConnection(conn) {
     
     // Check if this is a valid room connection
     if (AppState.isRoomCreator || AppState.roomId) {
-        conn.on('open', () => {
+        let connectionOpenHandler = () => {
             console.log('Connected to: ' + conn.peer);
+            
+            // Store the connection
             AppState.peers[conn.peer] = conn;
             
             // Exchange player info
-            conn.send({
+            sendWithRetry(conn, {
                 type: 'player_info',
                 name: AppState.playerName,
                 color: AppState.myColor,
@@ -1267,7 +1618,7 @@ function handleConnection(conn) {
             // Send current game state if room creator
             if (AppState.isRoomCreator && AppState.currentGame) {
                 // First confirm game type
-                conn.send({
+                sendWithRetry(conn, {
                     type: 'game_type',
                     gameType: AppState.currentGame
                 });
@@ -1277,25 +1628,40 @@ function handleConnection(conn) {
                     if (AppState.gameModules[AppState.currentGame]) {
                         AppState.gameModules[AppState.currentGame].sendGameState(conn);
                     }
-                }, 500); // Small delay to ensure game type is processed first
+                }, 1000); // Small delay to ensure game type is processed first
+            }
+        };
+        
+        // If connection is already open, call the handler immediately
+        if (conn.open) {
+            connectionOpenHandler();
+        } else {
+            conn.on('open', connectionOpenHandler);
+        }
+        
+        // Set up error handling
+        conn.on('error', err => {
+            console.error('Connection error from peer:', err);
+            handlePeerDisconnection(conn.peer);
+        });
+        
+        // Set up data handling
+        conn.on('data', data => {
+            try {
+                handlePeerMessage(conn.peer, data);
+            } catch (error) {
+                console.error('Error handling peer message:', error, data);
             }
         });
         
-        conn.on('data', data => {
-            handlePeerMessage(conn.peer, data);
-        });
-        
+        // Set up close handling
         conn.on('close', () => {
             console.log('Connection closed with: ' + conn.peer);
             handlePeerDisconnection(conn.peer);
         });
-        
-        conn.on('error', err => {
-            console.error('Connection error:', err);
-            handlePeerDisconnection(conn.peer);
-        });
     } else {
         // Automatically close connections if we're not in a room
+        console.log('Rejecting connection as we are not in a room');
         setTimeout(() => {
             if (conn.open) {
                 conn.close();

@@ -1,4 +1,118 @@
-﻿.version-info {
+﻿/* Notifications */
+#notification-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 300px;
+}
+
+.notification {
+    background-color: white;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    animation: slide-in 0.3s ease-out;
+    transform-origin: top right;
+}
+
+.notification-hiding {
+    animation: slide-out 0.3s ease-in forwards;
+}
+
+.notification.info {
+    border-left: 4px solid var(--primary-color);
+}
+
+.notification.success {
+    border-left: 4px solid var(--accent-color);
+}
+
+.notification.warning {
+    border-left: 4px solid var(--warning-color);
+}
+
+.notification.error {
+    border-left: 4px solid var(--danger-color);
+}
+
+.notification-header {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #eee;
+}
+
+.notification-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.notification-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #666;
+}
+
+.notification-body {
+    padding: var(--spacing-sm);
+}
+
+.notification-body p {
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+@keyframes slide-in {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slide-out {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}.error-actions {
+    margin-top: var(--spacing-md);
+    display: flex;
+    justify-content: center;
+}
+
+.network-info-container {
+    margin-top: var(--spacing-md);
+    text-align: center;
+}
+
+.loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-lg);
+}
+
+#network-info-content {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: var(--spacing-md);
+}.version-info {
     margin-top: var(--spacing-xs);
     font-size: 0.8rem;
     color: #aaa;
