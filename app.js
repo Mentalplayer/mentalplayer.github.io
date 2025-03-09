@@ -1,4 +1,988 @@
 /**
+ * Update room info display
+ */
+function updateRoomInfo() {
+    elements.roomInfo.style.display = 'block';
+    elements.currentRoomIdSpan.textContent = AppState.roomId;
+    elements.sidePanel.style.display = 'flex';
+    
+    // Add current player to players list if not already there
+    if (!AppState.players[AppState.playerId]) {
+        AppState.players[AppState.playerId] = {
+            name: AppState.playerName,
+            color: AppState.myColor,
+            id: AppState.playerId,
+            gameType: AppState.currentGame
+        };
+    }
+    
+    updatePlayersList();
+}/**
+ * Add additional event listeners after DOM is loaded
+ */
+function addAdditionalEventListeners() {
+    // Add WebRTC connection button to room controls
+    const roomControls = document.querySelector('.room-controls');
+    if (roomControls) {
+        // Replace existing manual connect button if it exists
+        const existingButton = document.getElementById('manual-connect-button');
+        if (existingButton) {
+            existingButton.remove();
+        }
+        
+        // Create new button
+        const webrtcConnectButton = document.createElement('button');
+        webrtcConnectButton.id = 'webrtc-connect-button';
+        webrtcConnectButton.className = 'button secondary-button';
+        webrtcConnectButton.innerHTML = '<i class="fas fa-plug"></i> Connect Manually';
+        webrtcConnectButton.addEventListener('click', () => {
+            showManualConnectionInput();
+        });
+        
+        roomControls.appendChild(webrtcConnectButton);
+    }
+    
+    // Add network info button to troubleshooting
+    const webrtcInfo = document.querySelector('.webrtc-info');
+    if (webrtcInfo) {
+        const networkInfoButton = document.createElement('button');
+        networkInfoButton.id = 'network-info-button';
+        networkInfoButton.className = 'button secondary-button';
+        networkInfoButton.innerHTML = '<i class="fas fa-network-wired"></i> Network Details';
+        networkInfoButton.addEventListener('click', showNetworkInfo);
+        
+        const networkInfoContainer = document.createElement('div');
+        networkInfoContainer.className = 'network-info-container';
+        networkInfoContainer.appendChild(networkInfoButton);
+        
+        webrtcInfo.appendChild(networkInfoContainer);
+    }
+    
+    // Add WebRTC status indicator to header
+    const connectionStatus = document.getElementById('connection-status');
+    if (connectionStatus) {
+        const webrtcStatus = document.createElement('div');
+        webrtcStatus.id = 'webrtc-status';
+        webrtcStatus.className = 'webrtc-status';
+        webrtcStatus.innerHTML = '<span class="webrtc-indicator">WebRTC</span>';
+        
+        if (connectionStatus.parentNode) {
+            connectionStatus.parentNode.insertBefore(webrtcStatus, connectionStatus.nextSibling);
+        }
+    }
+}
+
+/**
+ * Update the players list display
+ */
+function updatePlayersList() {
+    elements.playersContainer.innerHTML = '';
+    
+    Object.entries(AppState.players).forEach(([id, player]) => {
+        const playerElement = document.createElement('div');
+        playerElement.classList.add('player');
+        
+        if (id === AppState.playerId) {
+            playerElement.classList.add('current-player');
+        }
+        
+        const colorIndicator = document.createElement('div');
+        colorIndicator.classList.add('player-color');
+        colorIndicator.style.backgroundColor = player.color;
+        
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = player.name + (id === AppState.playerId ? ' (You)' : '');
+        
+        playerElement.appendChild(colorIndicator);
+        playerElement.appendChild(nameSpan);
+        
+        elements.playersContainer.appendChild(playerElement);
+    });
+}
+
+/**
+ * Send a chat message
+ */
+function sendChatMessage() {
+    const message = elements.chatInput.value.trim();
+    if (!message) return;
+    
+    // Clear input
+    elements.chatInput.value = '';
+    
+    // Add message to local chat
+    addChatMessage(AppState.playerId, message);
+    
+    // Send to peers
+    sendDataToPeers({
+        type: 'chat_message',
+        message: message
+    });
+}/**
+ * Generate a random ID (8 characters)
+ */
+function generateRandomId() {
+    return Math.random().toString(36).substring(2, 10).toUpperCase();
+}
+
+/**
+ * Update connection status display
+ */
+function updateConnectionStatus(status, details = '') {
+    elements.connectionStatus.className = 'connection-status ' + status;
+    
+    let statusText = status.charAt(0).toUpperCase() + status.slice(1);
+    if (details) {
+        statusText += ` <span class="status-details">(${details})</span>`;
+    }
+    
+    elements.connectionStatus.innerHTML = statusText;
+    
+    // Show troubleshooting if disconnected
+    if (status === 'disconnected' && AppState.roomId) {
+        const troubleshootButton = document.createElement('button');
+        troubleshootButton.className = 'troubleshoot-button';
+        troubleshootButton.innerHTML = '<i class="fas fa-question-circle"></i>';
+        troubleshootButton.title = 'Connection help';
+        troubleshootButton.addEventListener('click', showConnectionTroubleshooting);
+        elements.connectionStatus.appendChild(troubleshootButton);
+    }
+    
+    // Log status change
+    console.log(`Connection status: ${status}${details ? ' (' + details + ')' : ''}`);
+}
+
+/**
+ * Broadcast to all connected peers
+ */
+function broadcastToPeers(message) {
+    return sendDataToPeers(message);
+}/**
+ * Copy text to clipboard
+ */
+function copyToClipboard(text) {
+    // Create a temporary input element
+    const input = document.createElement('textarea');
+    input.style.position = 'fixed';
+    input.style.opacity = 0;
+    input.value = text;
+    document.body.appendChild(input);
+    
+    // Select and copy
+    input.select();
+    document.execCommand('copy');
+    
+    // Clean up
+    document.body.removeChild(input);
+}
+
+/**
+ * Create a new game room
+ */
+function createRoom() {
+    if (AppState.currentGame === null) {
+        alert('Please select a game first.');
+        return;
+    }
+    
+    // Check if already in a room
+    if (AppState.roomId && AppState.peerConnection) {
+        if (!confirm('You are already in a room. Would you like to leave the current room and create a new one?')) {
+            return;
+        }
+        
+        // Close current connection
+        closeWebRTCConnection();
+    }
+    
+    // Generate a random ID for this player if not already set
+    if (!AppState.playerId) {
+        AppState.playerId = generateRandomId();
+    }
+    
+    // Create WebRTC connection as room creator
+    createWebRTCConnection();
+}
+
+/**
+ * Join an existing room
+ */
+function joinRoom() {
+    // Get the connection info from the input
+    const connectionInfo = elements.roomIdInput.value.trim();
+    
+    if (!connectionInfo) {
+        showManualConnectionInput();
+        return;
+    }
+    
+    // Generate a random ID for this player if not already set
+    if (!AppState.playerId) {
+        AppState.playerId = generateRandomId();
+    }
+    
+    // Join WebRTC connection
+    joinWebRTCConnection(connectionInfo);
+}
+
+/**
+ * Show manual connection input modal
+ */
+function showManualConnectionInput() {
+    // Create or show the manual connection input
+    let container = document.getElementById('manual-join-container');
+    
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'manual-join-container';
+        container.className = 'modal';
+        
+        const content = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Join Game</h2>
+                </div>
+                <div class="modal-body">
+                    <p>Paste the connection information from the other player:</p>
+                    <textarea id="manual-connection-input" rows="6" class="connection-text" placeholder="Paste connection info here..."></textarea>
+                </div>
+                <div class="modal-buttons">
+                    <button id="manual-connect-button" class="modal-button primary-button">Connect</button>
+                    <button id="close-manual-join" class="modal-button secondary-button">Cancel</button>
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = content;
+        document.body.appendChild(container);
+        
+        // Add event listeners
+        document.getElementById('manual-connect-button').addEventListener('click', () => {
+            const connectionInfo = document.getElementById('manual-connection-input').value.trim();
+            if (connectionInfo) {
+                container.style.display = 'none';
+                joinWebRTCConnection(connectionInfo);
+            } else {
+                alert('Please paste the connection information.');
+            }
+        });
+        
+        document.getElementById('close-manual-join').addEventListener('click', () => {
+            container.style.display = 'none';
+        });
+        
+        // Close when clicking outside
+        container.addEventListener('click', (e) => {
+            if (e.target === container) {
+                container.style.display = 'none';
+            }
+        });
+    }
+    
+    // Show the container
+    container.style.display = 'flex';
+    
+    // Focus on the input
+    setTimeout(() => {
+        document.getElementById('manual-connection-input').focus();
+    }, 100);
+}/**
+ * Close WebRTC connection
+ */
+function closeWebRTCConnection() {
+    console.log('Closing WebRTC connection');
+    
+    // Close data channel
+    if (AppState.dataChannel) {
+        try {
+            AppState.dataChannel.close();
+        } catch (e) {
+            console.warn('Error closing data channel:', e);
+        }
+        AppState.dataChannel = null;
+    }
+    
+    // Close peer connection
+    if (AppState.peerConnection) {
+        try {
+            AppState.peerConnection.close();
+        } catch (e) {
+            console.warn('Error closing peer connection:', e);
+        }
+        AppState.peerConnection = null;
+    }
+    
+    // Reset state
+    AppState.peerConnections = {};
+    AppState.dataChannels = {};
+    AppState.players = {};
+    AppState.isConnecting = false;
+    
+    // Update UI
+    updateConnectionStatus('disconnected', 'connection closed');
+    updatePlayersList();
+    
+    // Reset room info if room creator
+    if (AppState.isRoomCreator) {
+        AppState.roomId = '';
+        AppState.isRoomCreator = false;
+        
+        if (document.getElementById('room-info')) {
+            document.getElementById('room-info').style.display = 'none';
+        }
+    }
+}
+
+/**
+ * Send data to all connected peers
+ */
+function sendDataToPeers(data) {
+    try {
+        // Add sender ID to the data
+        const fullData = {
+            ...data,
+            id: AppState.playerId
+        };
+        
+        // Convert to string
+        const dataString = JSON.stringify(fullData);
+        
+        // If we have a data channel, send through it
+        if (AppState.dataChannel && AppState.dataChannel.readyState === 'open') {
+            AppState.dataChannel.send(dataString);
+            return true;
+        } else {
+            console.warn('Data channel not open, message not sent');
+            return false;
+        }
+    } catch (error) {
+        console.error('Error sending data:', error);
+        return false;
+    }
+}
+
+/**
+ * Display connection info for sharing
+ */
+function displayConnectionInfo(offer) {
+    // Create connection info object
+    const connectionInfo = {
+        offer: offer,
+        roomId: AppState.roomId,
+        candidates: offer.candidates || []
+    };
+    
+    // Stringify for sharing
+    const offerStr = JSON.stringify(connectionInfo);
+    
+    // Get or create the connection info container
+    let container = document.getElementById('manual-connection-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'manual-connection-container';
+        container.className = 'manual-connection-container';
+        
+        const content = `
+            <div class="connection-info-box">
+                <h3>Share this connection information</h3>
+                <p>Copy and share this text with the person you want to play with:</p>
+                <textarea id="connection-info" readonly rows="6" class="connection-text"></textarea>
+                <div class="connection-actions">
+                    <button id="copy-connection-info" class="button primary-button">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                    <button id="share-connection-info" class="button secondary-button">
+                        <i class="fas fa-share-alt"></i> Share
+                    </button>
+                </div>
+                <div id="answer-form-container" class="answer-form-container">
+                    <h3>Enter response from other player</h3>
+                    <p>Paste the response you received from the other player:</p>
+                    <textarea id="answer-input" rows="6" class="connection-text" placeholder="Paste answer here..."></textarea>
+                    <button id="process-answer-button" class="button primary-button">Connect</button>
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = content;
+        
+        // Add to the page - insert after room info
+        const roomInfo = document.getElementById('room-info');
+        if (roomInfo && roomInfo.parentNode) {
+            roomInfo.parentNode.insertBefore(container, roomInfo.nextSibling);
+        } else {
+            // Fallback - add to game container
+            const gameContainer = document.getElementById('game-container');
+            if (gameContainer) {
+                gameContainer.prepend(container);
+            }
+        }
+        
+        // Add event listeners
+        document.getElementById('copy-connection-info').addEventListener('click', () => {
+            const infoText = document.getElementById('connection-info');
+            infoText.select();
+            document.execCommand('copy');
+            
+            // Show success feedback
+            const button = document.getElementById('copy-connection-info');
+            const originalText = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-check"></i> Copied!';
+            
+            setTimeout(() => {
+                button.innerHTML = originalText;
+            }, 2000);
+        });
+        
+        document.getElementById('share-connection-info').addEventListener('click', () => {
+            const infoText = document.getElementById('connection-info').value;
+            
+            // Try to use Web Share API if available
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Mentalplayer Connection',
+                    text: 'Join my Mentalplayer game with this connection info:',
+                    url: window.location.href
+                }).then(() => {
+                    console.log('Shared successfully');
+                }).catch((error) => {
+                    console.error('Error sharing:', error);
+                    // Fallback to clipboard
+                    copyToClipboard(infoText);
+                    alert('Connection info copied to clipboard. Please paste it to the other player.');
+                });
+            } else {
+                // Fallback to clipboard
+                copyToClipboard(infoText);
+                alert('Connection info copied to clipboard. Please paste it to the other player.');
+            }
+        });
+        
+        document.getElementById('process-answer-button').addEventListener('click', () => {
+            const answerText = document.getElementById('answer-input').value.trim();
+            if (answerText) {
+                processAnswer(answerText);
+            } else {
+                alert('Please paste the answer from the other player.');
+            }
+        });
+    }
+    
+    // Update the text
+    const infoText = document.getElementById('connection-info');
+    if (infoText) {
+        infoText.value = offerStr;
+    }
+    
+    // Show the container
+    container.style.display = 'block';
+}
+
+/**
+ * Display answer info for the joining peer
+ */
+function displayAnswerInfo(answer) {
+    // Create answer info object
+    const answerInfo = {
+        answer: answer,
+        candidates: answer.candidates || []
+    };
+    
+    // Stringify for sharing
+    const answerStr = JSON.stringify(answerInfo);
+    
+    // Get or create the answer info container
+    let container = document.getElementById('answer-info-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'answer-info-container';
+        container.className = 'manual-connection-container';
+        
+        const content = `
+            <div class="connection-info-box">
+                <h3>Share your response</h3>
+                <p>Copy and share this text with the person who invited you:</p>
+                <textarea id="answer-info" readonly rows="6" class="connection-text"></textarea>
+                <div class="connection-actions">
+                    <button id="copy-answer-info" class="button primary-button">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                    <button id="share-answer-info" class="button secondary-button">
+                        <i class="fas fa-share-alt"></i> Share
+                    </button>
+                </div>
+                <p class="connection-note">After sharing this, wait for the connection to be established.</p>
+            </div>
+        `;
+        
+        container.innerHTML = content;
+        
+        // Add to the page - insert after room info
+        const roomInfo = document.getElementById('room-info');
+        if (roomInfo && roomInfo.parentNode) {
+            roomInfo.parentNode.insertBefore(container, roomInfo.nextSibling);
+        } else {
+            // Fallback - add to game container
+            const gameContainer = document.getElementById('game-container');
+            if (gameContainer) {
+                gameContainer.prepend(container);
+            }
+        }
+        
+        // Add event listeners
+        document.getElementById('copy-answer-info').addEventListener('click', () => {
+            const infoText = document.getElementById('answer-info');
+            infoText.select();
+            document.execCommand('copy');
+            
+            // Show success feedback
+            const button = document.getElementById('copy-answer-info');
+            const originalText = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-check"></i> Copied!';
+            
+            setTimeout(() => {
+                button.innerHTML = originalText;
+            }, 2000);
+        });
+        
+        document.getElementById('share-answer-info').addEventListener('click', () => {
+            const infoText = document.getElementById('answer-info').value;
+            
+            // Try to use Web Share API if available
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Mentalplayer Connection Response',
+                    text: 'Here is my response to join your Mentalplayer game:',
+                    url: window.location.href
+                }).then(() => {
+                    console.log('Shared successfully');
+                }).catch((error) => {
+                    console.error('Error sharing:', error);
+                    // Fallback to clipboard
+                    copyToClipboard(infoText);
+                    alert('Response copied to clipboard. Please paste it to the other player.');
+                });
+            } else {
+                // Fallback to clipboard
+                copyToClipboard(infoText);
+                alert('Response copied to clipboard. Please paste it to the other player.');
+            }
+        });
+    }
+    
+    // Update the text
+    const infoText = document.getElementById('answer-info');
+    if (infoText) {
+        infoText.value = answerStr;
+    }
+    
+    // Show the container
+    container.style.display = 'block';
+}/**
+ * Set up event handlers for the peer connection
+ */
+function setupPeerConnectionEvents(peerConnection) {
+    // ICE Candidate event
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            console.log('New ICE candidate:', event.candidate);
+            // Store the candidate to be shared
+            if (AppState.isRoomCreator) {
+                if (!AppState.localOffer.candidates) {
+                    AppState.localOffer.candidates = [];
+                }
+                AppState.localOffer.candidates.push(event.candidate);
+                
+                // Update the displayed offer to include the new candidate
+                if (document.getElementById('connection-info')) {
+                    displayConnectionInfo(AppState.localOffer);
+                }
+            } else {
+                if (!AppState.localAnswer.candidates) {
+                    AppState.localAnswer.candidates = [];
+                }
+                AppState.localAnswer.candidates.push(event.candidate);
+                
+                // Update the displayed answer to include the new candidate
+                if (document.getElementById('answer-info')) {
+                    displayAnswerInfo(AppState.localAnswer);
+                }
+            }
+        } else {
+            console.log('ICE candidate gathering complete');
+        }
+    };
+    
+    // ICE connection state change
+    peerConnection.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', peerConnection.iceConnectionState);
+        
+        switch (peerConnection.iceConnectionState) {
+            case 'connected':
+                updateConnectionStatus('connected', 'direct connection');
+                AppState.isConnecting = false;
+                break;
+            case 'disconnected':
+                updateConnectionStatus('disconnected', 'connection lost');
+                break;
+            case 'failed':
+                updateConnectionStatus('disconnected', 'connection failed');
+                showConnectionErrorModal('WebRTC connection failed. Try sharing new connection data.');
+                AppState.isConnecting = false;
+                break;
+            case 'closed':
+                updateConnectionStatus('disconnected', 'connection closed');
+                AppState.isConnecting = false;
+                break;
+        }
+    };
+    
+    // Signaling state change
+    peerConnection.onsignalingstatechange = () => {
+        console.log('Signaling state:', peerConnection.signalingState);
+    };
+    
+    // Connection state change
+    peerConnection.onconnectionstatechange = () => {
+        console.log('Connection state:', peerConnection.connectionState);
+        
+        switch (peerConnection.connectionState) {
+            case 'connected':
+                // When connected, add the peer to the players list
+                if (!AppState.isRoomCreator) {
+                    const remotePeerId = AppState.roomId;
+                    AppState.peerConnections[remotePeerId] = peerConnection;
+                    AppState.dataChannels[remotePeerId] = AppState.dataChannel;
+                }
+                break;
+            case 'disconnected':
+            case 'failed':
+            case 'closed':
+                closeWebRTCConnection();
+                break;
+        }
+    };
+}
+
+/**
+ * Set up the data channel
+ */
+function setupDataChannel(dataChannel) {
+    console.log('Setting up data channel');
+    
+    dataChannel.onopen = () => {
+        console.log('Data channel open');
+        updateConnectionStatus('connected', 'data channel open');
+        
+        // Add self to players list
+        AppState.players[AppState.playerId] = {
+            name: AppState.playerName,
+            color: AppState.myColor,
+            id: AppState.playerId,
+            gameType: AppState.currentGame
+        };
+        
+        // Send player info
+        sendDataToPeers({
+            type: 'player_info',
+            name: AppState.playerName,
+            color: AppState.myColor,
+            id: AppState.playerId,
+            gameType: AppState.currentGame
+        });
+        
+        // Update players list
+        updatePlayersList();
+        
+        // Add a system message to the chat
+        addChatMessage('system', 'Connected! WebRTC data channel established.');
+        
+        // Make the connection form disappear and show game controls
+        if (document.getElementById('manual-connection-container')) {
+            document.getElementById('manual-connection-container').style.display = 'none';
+        }
+        
+        if (document.getElementById('answer-form-container')) {
+            document.getElementById('answer-form-container').style.display = 'none';
+        }
+        
+        // Show notification
+        showNotification('Connection Established', 'You are now connected to the other player!', 'success');
+    };
+    
+    dataChannel.onclose = () => {
+        console.log('Data channel closed');
+        updateConnectionStatus('disconnected', 'data channel closed');
+        
+        // Add a system message to the chat
+        addChatMessage('system', 'Disconnected. WebRTC data channel closed.');
+    };
+    
+    dataChannel.onerror = (error) => {
+        console.error('Data channel error:', error);
+        updateConnectionStatus('disconnected', 'data channel error');
+        
+        // Add a system message to the chat
+        addChatMessage('system', 'Error in data channel. Check console for details.');
+    };
+    
+    dataChannel.onmessage = (event) => {
+        try {
+            const message = JSON.parse(event.data);
+            console.log('Received message:', message);
+            
+            // Handle the message based on its type
+            handleDataChannelMessage(message);
+        } catch (error) {
+            console.error('Error handling message:', error);
+        }
+    };
+}
+
+/**
+ * Handle messages received through the data channel
+ */
+function handleDataChannelMessage(message) {
+    const senderId = message.id || 'unknown';
+    
+    switch (message.type) {
+        case 'player_info':
+            // Store player info
+            AppState.players[senderId] = {
+                name: message.name,
+                color: message.color,
+                id: senderId,
+                gameType: message.gameType
+            };
+            
+            // Update the players list
+            updatePlayersList();
+            
+            // Add a system message to the chat
+            addChatMessage('system', `${message.name} has joined the game.`);
+            break;
+            
+        case 'chat_message':
+            // Add the message to the chat
+            addChatMessage(senderId, message.message);
+            break;
+            
+        case 'game_type':
+            // If received game type differs from current, switch to it
+            if (message.gameType !== AppState.currentGame) {
+                selectGame(message.gameType, false);
+            }
+            break;
+            
+        default:
+            // Game-specific messages are handled by the respective game module
+            if (AppState.currentGame && AppState.gameModules[AppState.currentGame]) {
+                AppState.gameModules[AppState.currentGame].handlePeerMessage(senderId, message);
+            }
+            break;
+    }
+}/**
+ * Initialize WebRTC connection as a room creator
+ */
+async function createWebRTCConnection() {
+    try {
+        // Clean up any existing connection
+        if (AppState.peerConnection) {
+            closeWebRTCConnection();
+        }
+        
+        AppState.isConnecting = true;
+        updateConnectionStatus('connecting', 'creating connection');
+        
+        // Generate a random room ID
+        AppState.roomId = generateRandomId();
+        AppState.isRoomCreator = true;
+        
+        // Create a new RTCPeerConnection
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' }
+            ]
+        };
+        
+        AppState.peerConnection = new RTCPeerConnection(configuration);
+        console.log('Created peer connection as room creator');
+        
+        // Create a data channel
+        AppState.dataChannel = AppState.peerConnection.createDataChannel('gameChannel', {
+            ordered: true
+        });
+        
+        setupDataChannel(AppState.dataChannel);
+        
+        // Set up event handlers for the connection
+        setupPeerConnectionEvents(AppState.peerConnection);
+        
+        // Create an offer
+        const offer = await AppState.peerConnection.createOffer();
+        await AppState.peerConnection.setLocalDescription(offer);
+        
+        // Save the offer to be shared
+        AppState.localOffer = AppState.peerConnection.localDescription;
+        
+        // Display the connection info for manual sharing
+        displayConnectionInfo(AppState.localOffer);
+        
+        // Update UI
+        updateRoomInfo();
+        
+        console.log('Created offer:', AppState.localOffer);
+        return AppState.localOffer;
+    } catch (error) {
+        console.error('Error creating WebRTC connection:', error);
+        updateConnectionStatus('disconnected', 'connection failed');
+        showConnectionErrorModal('Failed to create connection: ' + error.message);
+        AppState.isConnecting = false;
+        return null;
+    }
+}
+
+/**
+ * Initialize WebRTC connection as a player joining a room
+ */
+async function joinWebRTCConnection(offerString) {
+    try {
+        // Clean up any existing connection
+        if (AppState.peerConnection) {
+            closeWebRTCConnection();
+        }
+        
+        AppState.isConnecting = true;
+        updateConnectionStatus('connecting', 'joining');
+        
+        // Not the room creator
+        AppState.isRoomCreator = false;
+        
+        // Parse the offer
+        let offerObj;
+        try {
+            offerObj = JSON.parse(offerString);
+        } catch (e) {
+            throw new Error('Invalid connection data. Please check and try again.');
+        }
+        
+        // Save the room ID from the offer
+        if (offerObj.roomId) {
+            AppState.roomId = offerObj.roomId;
+        } else {
+            AppState.roomId = generateRandomId(); // Fallback
+        }
+        
+        // Create a new RTCPeerConnection
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' }
+            ]
+        };
+        
+        AppState.peerConnection = new RTCPeerConnection(configuration);
+        console.log('Created peer connection as participant');
+        
+        // Set up event handlers for the connection
+        setupPeerConnectionEvents(AppState.peerConnection);
+        
+        // Listen for the data channel
+        AppState.peerConnection.ondatachannel = (event) => {
+            console.log('Received data channel');
+            AppState.dataChannel = event.channel;
+            setupDataChannel(AppState.dataChannel);
+        };
+        
+        // Set the remote description from the offer
+        const remoteOffer = new RTCSessionDescription(offerObj.offer);
+        await AppState.peerConnection.setRemoteDescription(remoteOffer);
+        
+        // Add any ICE candidates that were included
+        if (offerObj.candidates && Array.isArray(offerObj.candidates)) {
+            for (const candidate of offerObj.candidates) {
+                try {
+                    await AppState.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (e) {
+                    console.warn('Error adding received ICE candidate', e);
+                }
+            }
+        }
+        
+        // Create an answer
+        const answer = await AppState.peerConnection.createAnswer();
+        await AppState.peerConnection.setLocalDescription(answer);
+        
+        // Save the answer to be shared
+        AppState.localAnswer = AppState.peerConnection.localDescription;
+        
+        // Display the connection info for manual sharing
+        displayAnswerInfo(AppState.localAnswer);
+        
+        // Update UI
+        updateRoomInfo();
+        
+        console.log('Created answer:', AppState.localAnswer);
+        return AppState.localAnswer;
+    } catch (error) {
+        console.error('Error joining WebRTC connection:', error);
+        updateConnectionStatus('disconnected', 'join failed');
+        showConnectionErrorModal('Failed to join connection: ' + error.message);
+        AppState.isConnecting = false;
+        return null;
+    }
+}
+
+/**
+ * Process an answer from a peer
+ */
+async function processAnswer(answerString) {
+    try {
+        updateConnectionStatus('connecting', 'finalizing');
+        
+        // Parse the answer
+        let answerObj;
+        try {
+            answerObj = JSON.parse(answerString);
+        } catch (e) {
+            throw new Error('Invalid answer data. Please check and try again.');
+        }
+        
+        if (!AppState.peerConnection) {
+            throw new Error('No peer connection created. Please create a room first.');
+        }
+        
+        // Set the remote description from the answer
+        const remoteAnswer = new RTCSessionDescription(answerObj.answer);
+        await AppState.peerConnection.setRemoteDescription(remoteAnswer);
+        
+        // Add any ICE candidates that were included
+        if (answerObj.candidates && Array.isArray(answerObj.candidates)) {
+            for (const candidate of answerObj.candidates) {
+                try {
+                    await AppState.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (e) {
+                    console.warn('Error adding received ICE candidate', e);
+                }
+            }
+        }
+        
+        console.log('Processed answer');
+        
+        // Hide the input form for the answer
+        document.getElementById('answer-form-container').style.display = 'none';
+        
+        return true;
+    } catch (error) {
+        console.error('Error processing answer:', error);
+        updateConnectionStatus('disconnected', 'finalization failed');
+        showConnectionErrorModal('Failed to process answer: ' + error.message);
+        return false;
+    }
+}/**
  * Show network information for troubleshooting
  */
 async function showNetworkInfo() {
@@ -161,7 +1145,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (footer) {
             const versionElem = document.createElement('div');
             versionElem.className = 'version-info';
-            versionElem.innerHTML = 'v1.3.1 with enhanced resources';
+            versionElem.innerHTML = 'v2.0.0 with manual WebRTC';
             footer.appendChild(versionElem);
         }
         
@@ -173,7 +1157,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Show a welcome notification with connection tips
         setTimeout(() => {
             showNotification('Welcome to Mentalplayer', 
-                            'For best results, allow some time for connections to establish.', 
+                            'Use manual WebRTC connections for true peer-to-peer play!', 
                             'info');
         }, 3000);
     } catch (error) {
@@ -278,6 +1262,32 @@ function showCssLoadingWarning() {
         cssError.style.display = 'flex';
     }
 }
+
+// Global app state
+const AppState = {
+    playerName: '',
+    playerId: '',
+    currentGame: null,
+    roomId: '',
+    isRoomCreator: false,
+    peerConnections: {},
+    dataChannels: {},
+    players: {},
+    myColor: getRandomColor(),
+    gameModules: {},
+    isConnecting: false,
+    
+    // WebRTC objects
+    peerConnection: null,
+    dataChannel: null,
+    
+    // Signaling state
+    localOffer: null,
+    localAnswer: null,
+    remoteOffer: null,
+    remoteAnswer: null,
+    remoteCandidates: []
+};
 
 /**
  * Broadcast message to all connected peers

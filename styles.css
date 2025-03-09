@@ -1,4 +1,62 @@
-﻿/* Notifications */
+﻿/* WebRTC Status Indicator */
+.webrtc-status {
+    display: inline-flex;
+    align-items: center;
+    margin-left: var(--spacing-sm);
+}
+
+.webrtc-indicator {
+    background-color: #4CAF50;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: bold;
+    padding: 2px 5px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+/* Manual connection styling */
+.manual-connection-container {
+    margin: var(--spacing-md) 0;
+    padding: var(--spacing-md);
+    background-color: white;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+}
+
+.connection-info-box {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.connection-text {
+    width: 100%;
+    min-height: 100px;
+    padding: var(--spacing-sm);
+    border: 1px solid #ddd;
+    border-radius: var(--radius-sm);
+    font-family: monospace;
+    font-size: 0.9rem;
+    resize: vertical;
+}
+
+.connection-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.connection-note {
+    color: #666;
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+.answer-form-container {
+    margin-top: var(--spacing-md);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid #eee;
+}/* Notifications */
 #notification-container {
     position: fixed;
     top: 20px;
