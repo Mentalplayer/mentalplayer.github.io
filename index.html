@@ -7,6 +7,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAB+UlEQVR4AcWWA4wcURSGb23btm3b5tY2dm3btjG1a9vomtqqM/01mck8vGQn38l9/3nnnJkIUgotpZN20k8GSDHZLG+SaUaXtMpNYuO/pEBey1/ZIY/kp7yXUbJEVsobGSyxIkRq5YeEyS95IA9ltBSKL81kkfjTwL2cljcyVp1PkJPyVp7IV5n1px/nMDklv+S7PJU1skhG+PXJzRkUcEZ+yZLI3MClgfNyVz7JB3koP+SnvPEZ+3u5KCd8K+FRwHL5jRcyPDKfnD2CsVIivWWHZMk1eSEeQzko9+SUFP6hCU8BxfJUvslwt/d8Uuk0WCL3fbWXSbrnRTyST2YKeCz3pKvbu1S2y2e552uCgYhxaypPVIaLXJ4Wygm5Itd9nf7GAXDNW/L2s1QuyEXZJo9xQMBV3w5B8oL8ljVu70ZLudyTNbJDKuSRvJcj0s3NgKcARIjUyWPZJXMliRg5L3cZkHfS15sBbwGIsnyQY1Ljfj/h2YA3A4HgRbTKRw5AH08GgjXgLSA9WAPeAvKDNeAtoChYA94CyoI14C2gLlgD3gIagjHgCB8EE4QyYO2C9sEEod0DfYII8KYHhgYThNbjuDKIAG/j+GQQAd7GcUMQAd7OgaYIBuztHKhHY9GAgbBzLKaJ7cNkqdTjIGJl8OT/a84RoW8yxnkAAAAASUVORK5CYII=">
 </head>
 <body>
     <div class="app-container">
@@ -74,6 +75,10 @@
                 
                 <div id="room-info" class="room-info" style="display: none;">
                     <p>Room: <span id="current-room-id"></span></p>
+                    <div class="connection-info">
+                        <span class="ping-label">Ping: </span>
+                        <span id="ping-value">--</span> ms
+                    </div>
                 </div>
                 
                 <div id="minesweeper-game" class="minesweeper-container">
@@ -95,8 +100,14 @@
                     <!-- Players will be listed here -->
                 </div>
                 <div class="chat-container">
+                    <div class="panel-header">
+                        <h3>Chat</h3>
+                    </div>
                     <div class="chat-messages" id="chat-messages">
                         <!-- Chat messages will appear here -->
+                        <div class="system-message">
+                            <div class="message-text">Welcome to the chat! Be kind and have fun playing together.</div>
+                        </div>
                     </div>
                     <div class="chat-input-container">
                         <input type="text" id="chat-input" placeholder="Type a message...">
@@ -105,6 +116,15 @@
                 </div>
             </div>
         </main>
+
+        <footer class="main-footer">
+            <p>&copy; 2025 Mentalplayer | A multiplayer gaming platform</p>
+            <div class="footer-links">
+                <a href="#" onclick="showPrivacyPolicy(); return false;">Privacy Policy</a>
+                <a href="#" onclick="showAbout(); return false;">About</a>
+            </div>
+        </footer>
+    </div>
     </div>
     
     <!-- Name Entry Modal -->
@@ -114,8 +134,13 @@
                 <i class="fas fa-brain modal-logo"></i>
                 <h2>Welcome to Mentalplayer</h2>
             </div>
-            <p>Enter your name to continue:</p>
-            <input type="text" id="player-name-input" placeholder="Your Name">
+            <div class="modal-body">
+                <p>Enter your name to continue playing multiplayer games with friends!</p>
+                <input type="text" id="player-name-input" placeholder="Your Name" maxlength="20">
+                <p class="disclaimer-text" style="font-size: 0.8rem; color: #777; margin-top: 10px;">
+                    By continuing, you agree to our <a href="#" onclick="showPrivacyPolicy(); return false;">Privacy Policy</a>.
+                </p>
+            </div>
             <div class="modal-buttons">
                 <button id="continue-button" class="modal-button primary-button">Continue</button>
             </div>
@@ -125,10 +150,15 @@
     <!-- Game Over Modal -->
     <div id="game-over-modal" class="modal">
         <div class="modal-content">
-            <h2 id="game-result">Game Over</h2>
-            <p id="game-message"></p>
+            <div class="modal-header">
+                <h2 id="game-result">Game Over</h2>
+            </div>
+            <div class="modal-body">
+                <p id="game-message"></p>
+            </div>
             <div class="modal-buttons">
                 <button id="new-game-button" class="modal-button primary-button">New Game</button>
+                <button id="close-game-over-modal" class="modal-button secondary-button">Close</button>
             </div>
         </div>
     </div>
@@ -136,16 +166,43 @@
     <!-- Invite Modal -->
     <div id="invite-modal" class="modal">
         <div class="modal-content">
-            <h2>Invite Players</h2>
-            <div id="invite-modal-content">
+            <div class="modal-header">
+                <h2>Invite Players</h2>
+            </div>
+            <div class="modal-body">
                 <p>Share this link with friends to invite them to your game:</p>
-                <input type="text" id="invite-link" readonly>
-                <button id="copy-link" class="modal-button primary-button">
-                    <i class="fas fa-copy"></i> Copy Link
-                </button>
+                <div class="invite-container">
+                    <input type="text" id="invite-link" readonly>
+                    <button id="copy-link" class="modal-button primary-button">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+                <div class="share-options">
+                    <button class="share-button" onclick="shareViaWhatsApp()"><i class="fab fa-whatsapp"></i></button>
+                    <button class="share-button" onclick="shareViaEmail()"><i class="fas fa-envelope"></i></button>
+                    <button class="share-button" onclick="shareViaFacebook()"><i class="fab fa-facebook"></i></button>
+                    <button class="share-button" onclick="shareViaTwitter()"><i class="fab fa-twitter"></i></button>
+                </div>
             </div>
             <div class="modal-buttons">
                 <button id="close-invite-modal" class="modal-button secondary-button">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Connection Error Modal -->
+    <div id="connection-error-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Connection Error</h2>
+            </div>
+            <div class="modal-body">
+                <p id="connection-error-message">There was a problem connecting to the room.</p>
+                <p>Make sure the Room ID is correct and try again.</p>
+            </div>
+            <div class="modal-buttons">
+                <button id="retry-connection-button" class="modal-button primary-button">Retry</button>
+                <button id="close-connection-error-modal" class="modal-button secondary-button">Close</button>
             </div>
         </div>
     </div>
