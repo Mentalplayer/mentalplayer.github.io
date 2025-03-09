@@ -152,29 +152,34 @@ function addAdditionalEventListeners() {
 
 // Initialize the app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    initApp();
-    addAdditionalEventListeners();
-    
-    // Add a version number to the footer
-    const footer = document.querySelector('.main-footer');
-    if (footer) {
-        const versionElem = document.createElement('div');
-        versionElem.className = 'version-info';
-        versionElem.innerHTML = 'v1.3.0 with enhanced connection reliability';
-        footer.appendChild(versionElem);
+    try {
+        initApp();
+        addAdditionalEventListeners();
+        
+        // Add a version number to the footer
+        const footer = document.querySelector('.main-footer');
+        if (footer) {
+            const versionElem = document.createElement('div');
+            versionElem.className = 'version-info';
+            versionElem.innerHTML = 'v1.3.1 with enhanced resources';
+            footer.appendChild(versionElem);
+        }
+        
+        // Add notification container
+        const notificationContainer = document.createElement('div');
+        notificationContainer.id = 'notification-container';
+        document.body.appendChild(notificationContainer);
+        
+        // Show a welcome notification with connection tips
+        setTimeout(() => {
+            showNotification('Welcome to Mentalplayer', 
+                            'For best results, allow some time for connections to establish.', 
+                            'info');
+        }, 3000);
+    } catch (error) {
+        console.error('Error initializing app:', error);
+        alert('There was an error initializing the application. Please try refreshing the page.');
     }
-    
-    // Add notification container
-    const notificationContainer = document.createElement('div');
-    notificationContainer.id = 'notification-container';
-    document.body.appendChild(notificationContainer);
-    
-    // Show a welcome notification with connection tips
-    setTimeout(() => {
-        showNotification('Welcome to Mentalplayer', 
-                        'For best results, allow some time for connections to establish.', 
-                        'info');
-    }, 3000);
 });/**
  * Mentalplayer - Main Application
  * 
@@ -236,10 +241,42 @@ const elements = {
  * Initialize the application
  */
 function initApp() {
+    // Check if CSS has loaded properly
+    checkCssLoaded();
+    
     setupEventListeners();
     checkUrlForRoom();
     registerGameModules();
     checkSavedPlayerName();
+}
+
+/**
+ * Check if CSS has loaded properly
+ */
+function checkCssLoaded() {
+    // Basic check for CSS loading status
+    const hasStyles = document.styleSheets.length > 1; // At least one external stylesheet plus inline
+    console.log(`CSS check: ${hasStyles ? 'External stylesheets detected' : 'No external stylesheets detected'}`);
+    
+    // Additional check for specific styles
+    const appContainer = document.querySelector('.app-container');
+    if (appContainer) {
+        const containerStyle = window.getComputedStyle(appContainer);
+        if (containerStyle.display !== 'flex') {
+            console.warn('CSS may not be fully loaded or applied');
+            showCssLoadingWarning();
+        }
+    }
+}
+
+/**
+ * Show a warning about CSS loading issues
+ */
+function showCssLoadingWarning() {
+    const cssError = document.getElementById('css-loading-error');
+    if (cssError) {
+        cssError.style.display = 'flex';
+    }
 }
 
 /**
