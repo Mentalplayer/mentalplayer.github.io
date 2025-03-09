@@ -286,7 +286,7 @@
     </div>
     
     <!-- Connection Error Modal -->
-    <div id="connection-error-modal" class="modal">
+    <div id="connection-error-modal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h2><i class="fas fa-exclamation-triangle"></i> Connection Error</h2>
@@ -308,7 +308,7 @@
     </div>
     
     <!-- Manual Connection UI -->
-    <div id="manual-connection-ui" class="modal">
+    <div id="manual-connection-ui" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Manual Connection</h2>
@@ -339,7 +339,7 @@
     </div>
     
     <!-- Connectivity Guide Modal -->
-    <div id="connectivity-guide" class="modal">
+    <div id="connectivity-guide" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Connection Troubleshooting</h2>
@@ -377,6 +377,7 @@
             const continueButton = document.getElementById('continue-button');
             const playerNameInput = document.getElementById('player-name-input');
             const entryModal = document.getElementById('entry-modal');
+            const gameSelect = document.getElementById('game-select');
             
             if (continueButton) {
                 continueButton.addEventListener('click', function() {
@@ -391,8 +392,10 @@
                         // Update display
                         document.getElementById('player-display').textContent = name;
                         
-                        // Show a welcome message
-                        alert('Welcome, ' + name + '! Select a game to start playing.');
+                        // Make sure game selection is visible
+                        if (gameSelect) {
+                            gameSelect.style.display = 'block';
+                        }
                     } else {
                         alert('Please enter your name to continue.');
                     }
@@ -408,6 +411,42 @@
             // Add reload button functionality
             document.getElementById('reload-page').addEventListener('click', function() {
                 window.location.reload(true);
+            });
+            
+            // Make sure all other modals start hidden
+            const modalsToHide = [
+                'connectivity-guide',
+                'manual-connection-ui',
+                'connection-error-modal',
+                'game-over-modal',
+                'invite-modal'
+            ];
+            
+            modalsToHide.forEach(modalId => {
+                const modal = document.getElementById(modalId);
+                if (modal) {
+                    modal.style.display = 'none';
+                }
+            });
+            
+            // Add modal close handlers
+            document.querySelectorAll('.modal').forEach(modal => {
+                if (modal.id !== 'entry-modal') {
+                    // Add close button handlers
+                    const closeButtons = modal.querySelectorAll('.secondary-button');
+                    closeButtons.forEach(button => {
+                        button.addEventListener('click', function() {
+                            modal.style.display = 'none';
+                        });
+                    });
+                    
+                    // Close when clicking outside
+                    modal.addEventListener('click', function(e) {
+                        if (e.target === modal) {
+                            modal.style.display = 'none';
+                        }
+                    });
+                }
             });
         });
     </script>
