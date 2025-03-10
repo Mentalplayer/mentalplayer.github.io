@@ -3,17 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Mentalplayer - Play multiplayer puzzle games with friends online">
     <title>Mentalplayer</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./styles.css">
-    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAB+UlEQVR4AcWWA4wcURSGb23btm3b5tY2dm3btjG1a9vomtqqM/01mck8vGQn38l9/3nnnJkIUgotpZN20k8GSDHZLG+SaUaXtMpNYuO/pEBey1/ZIY/kp7yXUbJEVsobGSyxIkRq5YeEyS95IA9ltBSKL81kkfjTwL2cljcyVp1PkJPyVp7IV5n1px/nMDklv+S7PJU1skhG+PXJzRkUcEZ+yZLI3MClgfNyVz7JB3koP+SnvPEZ+3u5KCd8K+FRwHL5jRcyPDKfnD2CsVIivWWHZMk1eSEeQzko9+SUFP6hCU8BxfJUvslwt/d8Uuk0WCL3fbWXSbrnRTyST2YKeCz3pKvbu1S2y2e552uCgYhxaypPVIaLXJ4Wygm5Itd9nf7GAXDNW/L2s1QuyEXZJo9xQMBV3w5B8oL8ljVu70ZLudyTNbJDKuSRvJcj0s3NgKcARIjUyWPZJXMliRg5L3cZkHfS15sBbwGIsnyQY1Ljfj/h2YA3A4HgRbTKRw5AH08GgjXgLSA9WAPeAvKDNeAtoChYA94CyoI14C2gLlgD3gIagjHgCB8EE4QyYO2C9sEEod0DfYII8KYHhgYThNbjuDKIAG/j+GQQAd7GcUMQAd7OgaYIBuztHKhHY9GAgbBzLKaJ7cNkqdTjIGJl8OT/a84RoW8yxnkAAAAASUVORK5CYII=">
     
-    <!-- Add PeerJS library -->
-    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAB+UlEQVR4AcWWA4wcURSGb23btm3b5tY2dm3btjG1a9vomtqqM/01mck8vGQn38l9/3nnnJkIUgotpZN20k8GSDHZLG+SaUaXtMpNYuO/pEBey1/ZIY/kp7yXUbJEVsobGSyxIkRq5YeEyS95IA9ltBSKL81kovjTwL2cljcyVp1PkJPyVp7IV5n1px/nMDklv+S7PJU1skhG+PXJzRkUcEZ+yZLI3MClgfNyVz7JB3koP+SnvPEZ+3u5KCd8K+FRwHL5jRcyPDKfnD2CsVIivWWHZMk1eSEeQzko9+SUFP6hCU8BxfJUvslwt/d8Uuk0WCL3fbWXSbrnRTyST2YKeCz3pKvbu1S2y2e552uCgYhxaypPVIaLXJ4Wygm5Itd9nf7GAXDNW/L2s1QuyEXZJo9xQMBV3w5B8oL8ljVu70ZLudyTNbJDKuSRvJcj0s3NgKcARIjUyWPZJXMliRg5L3cZkHfS15sBbwGIsnyQY1Ljfj/h2YA3A4HgRbTKRw5AH08GgjXgLSA9WAPeAvKDNeAtoChYA94CyoI14C2gLlgD3gIagjHgCB8EE4QyYO2C9sEEod0DfYII8KYHhgYThNbjuDKIAG/j+GQQAd7GcUMQAd7OgaYIBuztHKhHY9GAgbBzLKaJ7cNkqdTjIGJl8OT/a84RoW8yxnkAAAAASUVORK5CYII=">
+    
+    <!-- Preload essential scripts -->
+    <link rel="preload" href="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js" as="script">
+    <link rel="preload" href="./core.js" as="script">
     
     <style>
-        /* Fallback minimal styles in case external CSS fails to load */
+        /* Critical styles for initial rendering */
         body {
             font-family: 'Roboto', sans-serif;
             margin: 0;
@@ -46,8 +52,6 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-
-        /* Critical styles for the entry modal */
         .modal {
             position: fixed;
             top: 0;
@@ -66,54 +70,30 @@
             padding: 20px;
             width: 90%;
             max-width: 500px;
-        }
-        .modal-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        .modal-logo {
-            font-size: 2rem;
-            color: #4a6fa5;
-            margin-right: 15px;
-        }
-        .modal-body {
-            margin: 15px 0;
-        }
-        .modal-body input {
-            width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        .modal-buttons {
-            display: flex;
-            justify-content: flex-end;
-        }
-        .primary-button {
-            background-color: #4a6fa5;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .primary-button:hover {
-            background-color: #3a5982;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
         }
     </style>
 </head>
+
 <body>
+    <!-- Loading message for resources -->
+    <div id="app-loading" class="loading-message" style="display: flex;">
+        <div class="loading-spinner"></div>
+        <h2>Loading Mentalplayer...</h2>
+        <p>Initializing your multiplayer experience</p>
+    </div>
+
     <!-- CSS Loading Error Message -->
-    <div id="css-loading-error" class="loading-message">
+    <div id="resource-error" class="loading-message">
         <div class="loading-spinner"></div>
         <h2>Loading resources...</h2>
-        <p>If this message doesn't disappear, there might be an issue loading the CSS.</p>
+        <p>If this message doesn't disappear, there might be an issue loading resources.</p>
         <button id="reload-page" style="padding: 10px 20px; background-color: #4a6fa5; color: white; border: none; border-radius: 5px; cursor: pointer;">Reload Page</button>
     </div>
 
+    <!-- Main App Container -->
     <div class="app-container">
+        <!-- Header -->
         <header class="main-header">
             <div class="logo">
                 <i class="fas fa-brain"></i>
@@ -125,30 +105,18 @@
             </div>
         </header>
 
+        <!-- Main Content Area -->
         <main>
-            <div class="game-select" id="game-select">
+            <!-- Game Selection Screen -->
+            <section id="game-select" class="game-select">
                 <h2>Select a Game</h2>
-                <div class="game-grid">
-                    <div class="game-card" data-game="minesweeper">
-                        <div class="game-icon">💣</div>
-                        <h3>Minesweeper</h3>
-                        <p>Classic puzzle game with multiplayer features</p>
-                    </div>
-                    <div class="game-card coming-soon">
-                        <div class="game-icon">🎮</div>
-                        <h3>Coming Soon</h3>
-                        <p>More multiplayer games on the way!</p>
-                    </div>
-                    <div class="game-card coming-soon">
-                        <div class="game-icon">🎲</div>
-                        <h3>Coming Soon</h3>
-                        <p>More multiplayer games on the way!</p>
-                    </div>
+                <div class="game-grid" id="game-grid">
+                    <!-- Game cards will be dynamically inserted here -->
                 </div>
-            </div>
+            </section>
 
-            <div class="game-container" id="game-container" style="display: none;">
-                <!-- Game content will be dynamically loaded here -->
+            <!-- Active Game Container -->
+            <section id="game-container" class="game-container" style="display: none;">
                 <div class="game-header">
                     <button id="back-to-games" class="button secondary-button">
                         <i class="fas fa-arrow-left"></i> Back to Games
@@ -157,13 +125,8 @@
                 </div>
 
                 <div class="controls">
-                    <div class="difficulty-controls">
-                        <label for="difficulty">Difficulty:</label>
-                        <select id="difficulty">
-                            <option value="beginner">Beginner (9x9, 10 mines)</option>
-                            <option value="intermediate" selected>Intermediate (16x16, 40 mines)</option>
-                            <option value="expert">Expert (16x30, 99 mines)</option>
-                        </select>
+                    <div id="game-controls" class="game-controls">
+                        <!-- Game-specific controls will be inserted here -->
                     </div>
                     
                     <div class="room-controls">
@@ -184,18 +147,12 @@
                     </div>
                 </div>
                 
-                <div id="minesweeper-game" class="minesweeper-container">
-                    <div class="status-bar">
-                        <div class="mine-count">000</div>
-                        <button class="reset-button">😊</button>
-                        <div class="timer">000</div>
-                    </div>
-                    
-                    <div class="board" id="minesweeper-board"></div>
-                </div>
-            </div>
+                <!-- Game-specific content will be inserted here -->
+                <div id="active-game-content"></div>
+            </section>
 
-            <div class="side-panel" id="side-panel" style="display: none;">
+            <!-- Side Panel (Players & Chat) -->
+            <aside id="side-panel" class="side-panel" style="display: none;">
                 <div class="panel-header">
                     <h3>Players</h3>
                 </div>
@@ -207,7 +164,6 @@
                         <h3>Chat</h3>
                     </div>
                     <div class="chat-messages" id="chat-messages">
-                        <!-- Chat messages will appear here -->
                         <div class="system-message">
                             <div class="message-text">Welcome to the chat! Be kind and have fun playing together.</div>
                         </div>
@@ -217,17 +173,22 @@
                         <button id="send-message" class="button primary-button">Send</button>
                     </div>
                 </div>
-            </div>
+            </aside>
         </main>
 
+        <!-- Footer -->
         <footer class="main-footer">
             <p>&copy; 2025 Mentalplayer | A multiplayer gaming platform</p>
             <div class="footer-links">
-                <a href="#" onclick="showPrivacyPolicy(); return false;">Privacy Policy</a>
-                <a href="#" onclick="showAbout(); return false;">About</a>
+                <a href="#" id="privacy-link">Privacy Policy</a>
+                <a href="#" id="about-link">About</a>
             </div>
         </footer>
     </div>
+
+    <!-- ==================== -->
+    <!-- ====== Modals ===== -->
+    <!-- ==================== -->
 
     <!-- Name Entry Modal -->
     <div id="entry-modal" class="modal" style="display: flex;">
@@ -277,10 +238,10 @@
                     </button>
                 </div>
                 <div class="share-options">
-                    <button class="share-button" onclick="shareViaWhatsApp()"><i class="fab fa-whatsapp"></i></button>
-                    <button class="share-button" onclick="shareViaEmail()"><i class="fas fa-envelope"></i></button>
-                    <button class="share-button" onclick="shareViaFacebook()"><i class="fab fa-facebook"></i></button>
-                    <button class="share-button" onclick="shareViaTwitter()"><i class="fab fa-twitter"></i></button>
+                    <button class="share-button" data-share="whatsapp"><i class="fab fa-whatsapp"></i></button>
+                    <button class="share-button" data-share="email"><i class="fas fa-envelope"></i></button>
+                    <button class="share-button" data-share="facebook"><i class="fab fa-facebook"></i></button>
+                    <button class="share-button" data-share="twitter"><i class="fab fa-twitter"></i></button>
                 </div>
             </div>
             <div class="modal-buttons">
@@ -290,7 +251,7 @@
     </div>
     
     <!-- Connection Error Modal -->
-    <div id="connection-error-modal" class="modal" style="display: none;">
+    <div id="connection-error-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <h2><i class="fas fa-exclamation-triangle"></i> Connection Error</h2>
@@ -311,39 +272,8 @@
         </div>
     </div>
     
-    <!-- Manual Connection UI -->
-    <div id="manual-connection-ui" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Manual Connection</h2>
-            </div>
-            <div class="modal-body">
-                <p>If automatic connection fails, try connecting manually:</p>
-                <div class="manual-connection-steps">
-                    <div class="connection-step">
-                        <h3>1. Share your ID with your friend</h3>
-                        <div class="connection-id-display">
-                            <span id="my-connection-id">Connecting...</span>
-                            <button id="copy-my-id" class="button primary-button"><i class="fas fa-copy"></i> Copy</button>
-                        </div>
-                    </div>
-                    <div class="connection-step">
-                        <h3>2. Enter your friend's ID</h3>
-                        <div class="friend-id-input">
-                            <input type="text" id="friend-id" placeholder="Enter friend's ID" maxlength="10">
-                            <button id="connect-to-friend" class="button primary-button">Connect</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-buttons">
-                <button id="close-manual-connection" class="modal-button secondary-button">Close</button>
-            </div>
-        </div>
-    </div>
-    
     <!-- Connectivity Guide Modal -->
-    <div id="connectivity-guide" class="modal" style="display: none;">
+    <div id="connectivity-guide" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <h2>Connection Troubleshooting</h2>
@@ -355,7 +285,7 @@
                     <li>Wait a moment for the WebRTC connection to establish</li>
                     <li>If on different networks, connections may take longer to establish</li>
                     <li>Disable VPNs or firewalls that might block WebRTC</li>
-                    <li>If all else fails, try the manual connection option</li>
+                    <li>If all else fails, try using a different browser</li>
                 </ol>
                 
                 <div class="webrtc-info">
@@ -364,66 +294,92 @@
                 </div>
             </div>
             <div class="modal-buttons">
-                <button id="show-manual-connection" class="modal-button primary-button">Try Manual Connection</button>
                 <button id="close-connectivity-guide" class="modal-button secondary-button">Close</button>
             </div>
         </div>
     </div>
+
+    <!-- Template for dynamic modals -->
+    <template id="modal-template">
+        <div class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title"></h2>
+                </div>
+                <div class="modal-body">
+                </div>
+                <div class="modal-buttons">
+                </div>
+            </div>
+        </div>
+    </template>
     
     <!-- Scripts -->
     <script>
+        // Initialize loading error detection
         document.addEventListener('DOMContentLoaded', function() {
-            console.log("DOM loaded, loading scripts");
+            console.log("DOM loaded, initializing app...");
             
-            // Basic script loading function
-            function loadScript(src, callback) {
-                const script = document.createElement('script');
-                script.src = src;
-                script.async = false;
-                
-                script.onload = function() {
-                    console.log(`Loaded script: ${src}`);
-                    if (callback) callback();
-                };
-                
-                script.onerror = function() {
-                    console.error(`Failed to load script: ${src}`);
-                    if (callback) callback(new Error(`Failed to load ${src}`));
-                };
-                
-                document.head.appendChild(script);
-            }
-            
-            // Hide loading error on successful script loading
-            function hideLoadingError() {
-                const cssError = document.getElementById('css-loading-error');
-                if (cssError) cssError.style.display = 'none';
-            }
-            
-            // Load scripts in sequence
-            loadScript('./connection-manager.js', function() {
-                loadScript('./minesweeper.js', function() {
-                    loadScript('./app.js', function() {
-                        console.log("All scripts loaded");
-                        hideLoadingError();
-                    });
-                });
+            // Hide app loading when resources are loaded
+            window.addEventListener('load', function() {
+                document.getElementById('app-loading').style.display = 'none';
             });
-            
-            // Set timeout to display error if scripts don't load quickly
-            setTimeout(function() {
-                const cssError = document.getElementById('css-loading-error');
-                if (cssError && window.getComputedStyle(cssError).display === 'none') {
-                    return; // Scripts loaded successfully
-                }
-                
-                // Display loading error
-                if (cssError) cssError.style.display = 'flex';
-            }, 5000);
             
             // Add reload button functionality
             document.getElementById('reload-page').addEventListener('click', function() {
                 window.location.reload(true);
+            });
+            
+            // Show resource error if scripts don't load within timeout
+            const resourceTimeout = setTimeout(function() {
+                document.getElementById('resource-error').style.display = 'flex';
+            }, 10000);
+            
+            // Load scripts in the proper order
+            function loadScript(src) {
+                return new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.async = false;
+                    
+                    script.onload = () => {
+                        console.log(`Loaded script: ${src}`);
+                        resolve(script);
+                    };
+                    
+                    script.onerror = () => {
+                        console.error(`Failed to load script: ${src}`);
+                        reject(new Error(`Failed to load ${src}`));
+                    };
+                    
+                    document.head.appendChild(script);
+                });
+            }
+            
+            // Load the scripts in sequence
+            Promise.all([
+                loadScript('https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js')
+            ])
+            .then(() => loadScript('./core.js'))
+            .then(() => loadScript('./connection.js'))
+            .then(() => loadScript('./game-registry.js'))
+            .then(() => loadScript('./games/minesweeper.js'))
+            .then(() => {
+                // All scripts loaded successfully
+                clearTimeout(resourceTimeout);
+                document.getElementById('resource-error').style.display = 'none';
+                console.log("All scripts loaded successfully");
+                
+                // Initialize app when scripts are loaded
+                if (typeof MentalPlayer !== 'undefined' && MentalPlayer.init) {
+                    MentalPlayer.init();
+                } else {
+                    console.error("MentalPlayer initialization function not found");
+                }
+            })
+            .catch(error => {
+                console.error("Error loading scripts:", error);
+                document.getElementById('resource-error').style.display = 'flex';
             });
         });
     </script>
