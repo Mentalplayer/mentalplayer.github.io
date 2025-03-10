@@ -210,9 +210,13 @@ function createRoom() {
     if (typeof ConnectionManager !== 'undefined') {
         ConnectionManager.createRoom();
         
-        // Sync state
+        // Sync state immediately
         AppState.roomId = ConnectionManager.roomId;
         AppState.isRoomCreator = ConnectionManager.isRoomCreator;
+        console.log("Room created - States synced:", {
+            AppState: { roomId: AppState.roomId, isCreator: AppState.isRoomCreator },
+            CM: { roomId: ConnectionManager.roomId, isCreator: ConnectionManager.isRoomCreator }
+        });
     } else {
         alert('Connection manager not initialized. Please refresh the page and try again.');
     }
@@ -563,6 +567,7 @@ function setupEventListeners() {
 /**
  * Handle player name submission and initialize connections
  */
+// In app.js - modify handlePlayerNameSubmit function
 function handlePlayerNameSubmit() {
     const name = elements.playerNameInput.value.trim();
     if (name) {
@@ -577,30 +582,29 @@ function handlePlayerNameSubmit() {
                 playerName: name
             });
             
-            // Sync IDs
-            setTimeout(() => {
-                AppState.playerId = ConnectionManager.playerId;
-                
-                // Show notification
-                ConnectionManager.showNotification('Welcome, ' + name + '!', 'Select a game to start playing.', 'success');
-                
-                // Auto-join room if in URL
-                const urlParams = new URLSearchParams(window.location.search);
-                const roomParam = urlParams.get('room');
-                if (roomParam) {
-                    setTimeout(() => {
-                        ConnectionManager.joinRoom(roomParam);
-                    }, 1000);
-                }
-            }, 500);
-        } else {
-            console.error('ConnectionManager not available');
+            // Sync IDs immediately
+            AppState.playerId = ConnectionManager.playerId;
             
-            // Generate a fallback ID
-            AppState.playerId = generateRandomId();
+            // Set up sync for roomId and isRoomCreator
+            const syncStates = () => {
+                AppState.roomId = ConnectionManager.roomId;
+                AppState.isRoomCreator = ConnectionManager.isRoomCreator;
+                
+                // Check if values are synced properly
+                console.log("State sync: ", {
+                    CM_roomId: ConnectionManager.roomId,
+                    App_roomId: AppState.roomId,
+                    CM_isCreator: ConnectionManager.isRoomCreator,
+                    App_isCreator: AppState.isRoomCreator
+                });
+            };
             
-            // Show notification using a basic fallback
-            showBasicNotification('Welcome, ' + name + '!', 'Select a game to start playing.');
+            // Run the sync now and set up an interval to ensure they stay in sync
+            syncStates();
+            setInterval(syncStates, 1000);
+            
+            // Show notification
+            ConnectionManager.showNotification('Welcome, ' + name + '!', 'Select a game to start playing.', 'success');
         }
     } else {
         alert('Please enter your name to continue.');

@@ -157,6 +157,16 @@ const ConnectionManager = {
         // Set as room creator
         this.isRoomCreator = true;
         this.roomId = this.playerId;
+    
+        // Sync with AppState if it exists
+        if (typeof AppState !== 'undefined') {
+            AppState.roomId = this.roomId;
+            AppState.isRoomCreator = this.isRoomCreator;
+            console.log("States after room creation:", {
+                CM: { roomId: this.roomId, isCreator: this.isRoomCreator },
+                App: { roomId: AppState.roomId, isCreator: AppState.isRoomCreator }
+            });
+        }
         
         // Update UI
         this.updateRoomInfo();
