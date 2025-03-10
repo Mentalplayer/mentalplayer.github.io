@@ -92,6 +92,18 @@ const MinesweeperGame = (() => {
         return true;
     }
     
+    function sendGameAction(action, data = {}) {
+        console.log(`[Minesweeper] Sending game action: ${action}`, data);
+    
+        if (state.context && state.context.sendMessage) {
+            state.context.sendMessage('game_data', {
+                game: 'minesweeper',
+                action,
+                ...data
+            });
+        }
+    }
+
     /**
      * Create game UI structure
      * @param {HTMLElement} container Container to render in
@@ -800,6 +812,10 @@ const MinesweeperGame = (() => {
      * @param {Object} message Message data
      */
     function handleMessage(peerId, message) {
+
+        // Log all incoming game messages
+        console.log(`[Minesweeper] Received message from ${peerId}:`, message);
+
         // Ignore non-game messages
         if (!message || !message.data || message.gameId !== 'minesweeper') {
             return;

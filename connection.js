@@ -378,9 +378,97 @@ const ConnectionManager = (() => {
      * @param {Object} connection PeerJS connection object
      */
     function handleIncomingConnection(connection) {
+        const peerId = connection.peer;
+    
+        log(`Processing incoming connection from peer: ${peerId}`);
+    
         // Set up connection event handlers
         setupConnectionEventListeners(connection);
+    
+        // When the connection is open, we'll set up the peer in our system
+        connection.on('open', () => {
+            log(`Connection fully established with peer: ${peerId}`);
+        
+            // Add to active connections
+            state.activeConnections[peerId] = connection;
+        
+            // If we're the host, send a welcome message and current state
+            if (state.isHost) {
+                log(`Sending welcome data to peer: ${peerId}`);
+            
+                // First add ourselves to the peer list if not already there
+                if (!state.peers[state.userId]) {
+                    state.peers[state.userId] = {
+                        id: state.userId,
+                        name: state.userName,
+                        isHost: true,
+                        color: getColorForUser(state.userId)
+                    };
+                }
+            
+                // Send the complete peer list to the new peer
+                sendToPeer(peerId, {
+                    type: 'peer_list',
+                    peers: state.peers
+                });
+            
+                // Notify all other peers about the new connection
+                broadcastToPeers({
+                    type: 'peer_joined',
+                    peerId: peerId,
+                    userName: state.peers[peerId] ? state.peers[peerId].name : 'Unknown User'
+                }, [peerId]); // Exclude the new peer from this broadcast
+            
+                // If we have a current game state, send it after a short delay
+                // to ensure the peer has processed previous messages
+                setTimeout(() => {
+                    if (state.gameState) {
+                        log(`Sending current game state to peer: ${peerId}`);
+                        sendToPeer(peerId, {
+                            type: 'game_state',
+                            state: state.gameState
+                        });
+                    }
+                
+                    // Also ask the active game to send its state if available
+                    if (window.MentalPlayer && 
+                        window.MentalPlayer.activeGame && 
+                        window.MentalPlayer.activeGame.instance && 
+                        typeof window.MentalPlayer.activeGame.instance.sendGameState === 'function') {
+                        log(`Requesting game module to send state to peer: ${peerId}`);
+                        window.MentalPlayer.activeGame.instance.sendGameState();
+                    }
+                }, 1000); // Short delay for connection stabilization
+            
+                // Add welcome message to chat
+                if (window.MentalPlayer && window.MentalPlayer.addChatMessage) {
+                    const peerName = state.peers[peerId] ? state.peers[peerId].name : 'New player';
+                    window.MentalPlayer.addChatMessage('system', '', `${peerName} has joined the room.`);
+                }
+            }
+        
+            // Start heartbeat for this connection
+            startPeerHeartbeat(peerId);
+        });
     }
+
+    // Handle errors specifically for this connection
+    connection.on('error', (err) => {
+        log(`Error with peer ${peerId} connection: ${err.message}`, 'error');
+        // If this is a critical connection (e.g., host for non-host peer), handle accordingly
+        if (!state.isHost && peerId === state.roomId) {
+            updateStatus('error', 'Lost connection to host');
+            // Show notification
+            if (window.MentalPlayer && window.MentalPlayer.showNotification) {
+                window.MentalPlayer.showNotification(
+                    'Connection Error',
+                    'Lost connection to the game host. You may need to rejoin the room.',
+                    'error'
+                );
+            }
+        }
+    });
+}
     
     /**
      * Set up event listeners for a peer connection
@@ -535,6 +623,42 @@ const ConnectionManager = (() => {
      */
     function handlePeerMessage(peerId, data) {
         if (!data || !data.type) return;
+
+        // Add debug logging to trace message flow
+        console.log(`[ConnectionManager] Handling message of type ${data.type} from peer ${peerId}`);
+    
+        // For game data messages, ensure they're properly forwarded to all peers
+        if (data.type === 'game_data') {
+            // If we're the host, forward the message to all other peers
+            if (state.isHost) {
+                console.log(`[ConnectionManager] Forwarding game data to all peers except ${peerId}`);
+                broadcastToPeers(data, [peerId]); // Exclude the sender
+            }
+        
+            // Make sure we're calling the game message handler
+            if (window.MentalPlayer && window.MentalPlayer.handleGameMessage) {
+                window.MentalPlayer.handleGameMessage(peerId, data);
+            }
+        }
+    
+        // For chat messages, ensure they're properly forwarded
+        if (data.type === 'chat_message') {
+            // Add the message to local chat
+            if (window.MentalPlayer && window.MentalPlayer.addChatMessage) {
+                const peerName = state.peers[peerId] ? state.peers[peerId].name : 'Unknown User';
+                window.MentalPlayer.addChatMessage(peerId, peerName, data.message);
+            }
+        
+            // If we're the host, forward message to all other peers
+            if (state.isHost) {
+                console.log(`[ConnectionManager] Forwarding chat message to all peers except ${peerId}`);
+                broadcastToPeers({
+                    type: 'chat_message',
+                    peerId: peerId,
+                    message: data.message
+                }, [peerId]); // Exclude sender
+            }
+        }
         
         // Skip logging heartbeat messages to avoid noise
         if (data.type !== 'heartbeat' && data.type !== 'heartbeat_ack') {
