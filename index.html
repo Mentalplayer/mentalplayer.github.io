@@ -10,11 +10,12 @@
     <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAB+UlEQVR4AcWWA4wcURSGb23btm3b5tY2dm3btjG1a9vomtqqM/01mck8vGQn38l9/3nnnJkIUgotpZN20k8GSDHZLG+SaUaXtMpNYuO/pEBey1/ZIY/kp7yXUbJEVsobGSyxIkRq5YeEyS95IA9ltBSKL81kkfjTwL2cljcyVp1PkJPyVp7IV5n1px/nMDklv+S7PJU1skhG+PXJzRkUcEZ+yZLI3MClgfNyVz7JB3koP+SnvPEZ+3u5KCd8K+FRwHL5jRcyPDKfnD2CsVIivWWHZMk1eSEeQzko9+SUFP6hCU8BxfJUvslwt/d8Uuk0WCL3fbWXSbrnRTyST2YKeCz3pKvbu1S2y2e552uCgYhxaypPVIaLXJ4Wygm5Itd9nf7GAXDNW/L2s1QuyEXZJo9xQMBV3w5B8oL8ljVu70ZLudyTNbJDKuSRvJcj0s3NgKcARIjUyWPZJXMliRg5L3cZkHfS15sBbwGIsnyQY1Ljfj/h2YA3A4HgRbTKRw5AH08GgjXgLSA9WAPeAvKDNeAtoChYA94CyoI14C2gLlgD3gIagjHgCB8EE4QyYO2C9sEEod0DfYII8KYHhgYThNbjuDKIAG/j+GQQAd7GcUMQAd7OgaYIBuztHKhHY9GAgbBzLKaJ7cNkqdTjIGJl8OT/a84RoW8yxnkAAAAASUVORK5CYII=">
     <style>
         /* Fallback minimal styles in case external CSS fails to load */
+    <!-- Add PeerJS library -->
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
         body {
             font-family: 'Roboto', sans-serif;
 <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
             margin: 0;
-            padding: 0;
             background-color: #f5f7fa;
         }
         .loading-message {
@@ -735,150 +736,60 @@ document.addEventListener('DOMContentLoaded', function() {
             const createRoomButton = document.getElementById('create-room');
             if (createRoomButton) {
                 createRoomButton.addEventListener('click', function() {
-                    console.log("Create Room clicked");
-                    
-                    // Check if ConnectionManager exists
-                    if (typeof ConnectionManager === 'undefined') {
-                        console.error("ConnectionManager is undefined");
-                        alert("Connection system not loaded. Please refresh the page.");
-                        return;
-                    }
-                    
-                    // Check player name
-                    const playerName = localStorage.getItem('playerName');
-                    if (!playerName) {
-                        alert("Please enter your name first.");
-                        return;
-                    }
-                    
-                    // Check current game
-                    if (typeof AppState !== 'undefined' && !AppState.currentGame) {
-                        alert('Please select a game first.');
-                        return;
-                    }
-                    
-                    // Initialize ConnectionManager if needed
-                    if (!ConnectionManager.playerId) {
-                        console.log("Reinitializing ConnectionManager");
-                        ConnectionManager.init({
-                            playerName: playerName
-                        });
-                        // Give it a moment to initialize
-                        setTimeout(() => {
-                            ConnectionManager.createRoom();
-                        }, 500);
-                    } else {
-                        ConnectionManager.createRoom();
-                    }
-                });
+    <!-- Scripts -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log("DOM loaded, loading scripts");
+            
+            // Basic script loading function
+            function loadScript(src, callback) {
+                const script = document.createElement('script');
+                script.src = src;
+                script.async = false;
+                
+                script.onload = function() {
+                    console.log(`Loaded script: ${src}`);
+                    if (callback) callback();
+                };
+                
+                script.onerror = function() {
+                    console.error(`Failed to load script: ${src}`);
+                    if (callback) callback(new Error(`Failed to load ${src}`));
+                };
+                
+                document.head.appendChild(script);
             }
             
-            // Check for CSS loading issues
-            const bodyBg = window.getComputedStyle(document.body).backgroundColor;
-            if (bodyBg === 'rgba(0, 0, 0, 0)' || !bodyBg) {
-                document.getElementById('css-loading-error').style.display = 'flex';
+            // Hide loading error on successful script loading
+            function hideLoadingError() {
+                const cssError = document.getElementById('css-loading-error');
+                if (cssError) cssError.style.display = 'none';
             }
+            
+            // Load scripts in sequence
+            loadScript('./connection-manager.js', function() {
+                loadScript('./minesweeper.js', function() {
+                    loadScript('./app.js', function() {
+                        console.log("All scripts loaded");
+                        hideLoadingError();
+                    });
+                });
+            });
+            
+            // Set timeout to display error if scripts don't load quickly
+            setTimeout(function() {
+                const cssError = document.getElementById('css-loading-error');
+                if (cssError && window.getComputedStyle(cssError).display === 'none') {
+                    return; // Scripts loaded successfully
+                }
+                
+                // Display loading error
+                if (cssError) cssError.style.display = 'flex';
+            }, 5000);
             
             // Add reload button functionality
             document.getElementById('reload-page').addEventListener('click', function() {
                 window.location.reload(true);
             });
-            
-            // Make sure all other modals start hidden
-            const modalsToHide = [
-                'connectivity-guide',
-                'manual-connection-ui',
-                'connection-error-modal',
-                'game-over-modal',
-                'invite-modal'
-            ];
-            
-            modalsToHide.forEach(modalId => {
-                const modal = document.getElementById(modalId);
-                if (modal) {
-                    modal.style.display = 'none';
-                }
-            });
-            
-            // Add modal close handlers
-            document.querySelectorAll('.modal').forEach(modal => {
-                if (modal.id !== 'entry-modal') {
-                    // Add close button handlers
-                    const closeButtons = modal.querySelectorAll('.secondary-button');
-                    closeButtons.forEach(button => {
-                        button.addEventListener('click', function() {
-                            modal.style.display = 'none';
-                        });
-                    });
-                    
-                    // Close when clicking outside
-                    modal.addEventListener('click', function(e) {
-                        if (e.target === modal) {
-                            modal.style.display = 'none';
-                        }
-                    });
-                }
-            });
-            
-            // Enable game cards to work directly
-            const gameCards = document.querySelectorAll('.game-card:not(.coming-soon)');
-            gameCards.forEach(card => {
-                card.addEventListener('click', function() {
-                    const gameType = card.getAttribute('data-game');
-                    if (gameType) {
-                        // Show game container, hide game selection
-                        document.getElementById('game-select').style.display = 'none';
-                        document.getElementById('game-container').style.display = 'block';
-                        document.getElementById('side-panel').style.display = 'flex';
-                        
-                        // Set game title
-                        document.getElementById('current-game-title').textContent = 
-                            gameType.charAt(0).toUpperCase() + gameType.slice(1);
-                        
-                        // Set AppState.currentGame if available
-                        if (typeof AppState !== 'undefined') {
-                            AppState.currentGame = gameType;
-                        }
-                        
-                        // Initialize game if MinesweeperGame is available
-                        if (typeof MinesweeperGame !== 'undefined') {
-                            MinesweeperGame.init();
-                        }
-                    }
-                });
-            });
-            
-            // Add back to games button functionality
-            document.getElementById('back-to-games').addEventListener('click', function() {
-                document.getElementById('game-select').style.display = 'block';
-                document.getElementById('game-container').style.display = 'none';
-                document.getElementById('side-panel').style.display = 'none';
-                
-                // Reset AppState.currentGame if available
-                if (typeof AppState !== 'undefined') {
-                    AppState.currentGame = null;
-                }
-            });
-        }
-        
-        // Load scripts in sequence with better error handling
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log("DOM loaded, starting script loading");
-            
-            loadScriptsSequentially([
-                'https://webrtc.github.io/adapter/adapter-latest.js',
-                './webrtc.js',
-                './connection-manager.js',
-                './game-modules.js',
-                './minesweeper.js',
-                './app.js'
-            ], function(success) {
-                console.log("Scripts loaded successfully:", success);
-                initializeAfterScriptLoad(success);
-            }, 3);  // Allow up to 3 retries
         });
     </script>
-    <script src="./diagnostic-tools.js"></script>
-    <script src="./connection-utilities.js"></script>
-</body>
-</html>
