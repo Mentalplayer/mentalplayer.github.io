@@ -271,7 +271,11 @@ const MentalPlayer = (() => {
         // Click outside modals to close
         window.addEventListener('click', event => {
             if (event.target.classList.contains('modal')) {
-                event.target.style.display = 'none';
+                // Only allow clicking outside for non-essential modals
+                const modalId = event.target.id;
+                if (modalId !== 'entry-modal') {  // Prevent closing the name entry modal
+                    event.target.style.display = 'none';
+                }
             }
         });
     }
