@@ -1,8 +1,8 @@
 /**
- * Mentalplayer - Main Application
+ * Mentalplayer - Main Application with Improved State Management
  * 
  * Handles core functionality like player authentication, game selection,
- * and managing the game infrastructure.
+ * and managing the game infrastructure with better state synchronization.
  */
 
 // Global app state
@@ -53,35 +53,48 @@ const elements = {
 };
 
 /**
- * Initialize the application
+ * Initialize the application with improved error handling
  */
 function initApp() {
+    console.log('[App] Initializing application...');
+    
     // Check if CSS has loaded properly
     checkCssLoaded();
     
+    // Setup event listeners
     setupEventListeners();
+    
+    // Check URL for room invitations
     checkUrlForRoom();
+    
+    // Register game modules
     registerGameModules();
+    
+    // Check for saved player name
     checkSavedPlayerName();
     
     // Load the WebRTC adapter for better browser compatibility
     loadScript('https://webrtc.github.io/adapter/adapter-latest.js');
+    
+    console.log('[App] Initialization complete');
 }
 
 /**
  * Check if CSS has loaded properly
  */
 function checkCssLoaded() {
+    console.log('[App] Checking CSS loading status');
+    
     // Basic check for CSS loading status
     const hasStyles = document.styleSheets.length > 1; // At least one external stylesheet plus inline
-    console.log(`CSS check: ${hasStyles ? 'External stylesheets detected' : 'No external stylesheets detected'}`);
+    console.log(`[App] CSS check: ${hasStyles ? 'External stylesheets detected' : 'No external stylesheets detected'}`);
     
     // Additional check for specific styles
     const appContainer = document.querySelector('.app-container');
     if (appContainer) {
         const containerStyle = window.getComputedStyle(appContainer);
         if (containerStyle.display !== 'flex') {
-            console.warn('CSS may not be fully loaded or applied');
+            console.warn('[App] CSS may not be fully loaded or applied');
             showCssLoadingWarning();
         }
     }
@@ -91,6 +104,8 @@ function checkCssLoaded() {
  * Show a warning about CSS loading issues
  */
 function showCssLoadingWarning() {
+    console.log('[App] Showing CSS loading warning');
+    
     const cssError = document.getElementById('css-loading-error');
     if (cssError) {
         cssError.style.display = 'flex';
@@ -101,6 +116,8 @@ function showCssLoadingWarning() {
  * Load a script dynamically
  */
 function loadScript(src, callback) {
+    console.log(`[App] Loading script: ${src}`);
+    
     const script = document.createElement('script');
     script.src = src;
     
@@ -109,7 +126,7 @@ function loadScript(src, callback) {
     }
     
     script.onerror = () => {
-        console.error(`Failed to load script: ${src}`);
+        console.error(`[App] Failed to load script: ${src}`);
     };
     
     document.head.appendChild(script);
@@ -128,20 +145,26 @@ function getRandomColor() {
  * Check URL for room ID (for invited players)
  */
 function checkUrlForRoom() {
+    console.log('[App] Checking URL for room parameter');
+    
     const urlParams = new URLSearchParams(window.location.search);
     const roomParam = urlParams.get('room');
     
     if (roomParam) {
+        console.log(`[App] Found room parameter in URL: ${roomParam}`);
         elements.roomIdInput.value = roomParam;
     }
 }
 
 /**
- * Select a game to play
+ * Select a game to play with improved state management
  */
 function selectGame(gameType, broadcast = true) {
+    console.log(`[App] Selecting game: ${gameType}, broadcast: ${broadcast}`);
+    
     if (!AppState.gameModules[gameType]) {
-        console.error(`Game module ${gameType} not found`);
+        console.error(`[App] Game module ${gameType} not found`);
+        alert(`Game "${gameType}" is not available. Please choose another game.`);
         return;
     }
     
@@ -157,6 +180,11 @@ function selectGame(gameType, broadcast = true) {
     // Initialize the selected game
     AppState.gameModules[gameType].init();
     
+    // Sync with ConnectionManager if available
+    if (typeof ConnectionManager !== 'undefined') {
+        ConnectionManager.gameModule = AppState.gameModules[gameType];
+    }
+    
     // If connected and room creator, broadcast game type to all peers
     if (broadcast && AppState.roomId && AppState.isRoomCreator) {
         if (typeof ConnectionManager !== 'undefined') {
@@ -166,12 +194,16 @@ function selectGame(gameType, broadcast = true) {
             });
         }
     }
+    
+    console.log(`[App] Game "${gameType}" selected and initialized`);
 }
 
 /**
- * Return to game selection screen
+ * Return to game selection screen with improved handling
  */
 function returnToGameSelection() {
+    console.log('[App] Returning to game selection');
+    
     // If in a room, ask for confirmation
     if (AppState.roomId) {
         if (!confirm('Leaving the game will disconnect you from the current room. Continue?')) {
@@ -194,13 +226,17 @@ function returnToGameSelection() {
     elements.sidePanel.style.display = 'none';
     
     AppState.currentGame = null;
+    
+    console.log('[App] Returned to game selection');
 }
 
 /**
- * Create a new game room 
+ * Create a new game room with improved handling
  * Now delegated to ConnectionManager
  */
 function createRoom() {
+    console.log('[App] Creating room');
+    
     if (!AppState.currentGame) {
         alert('Please select a game first.');
         return;
@@ -210,23 +246,29 @@ function createRoom() {
     if (typeof ConnectionManager !== 'undefined') {
         ConnectionManager.createRoom();
         
-        // Sync state immediately
-        AppState.roomId = ConnectionManager.roomId;
-        AppState.isRoomCreator = ConnectionManager.isRoomCreator;
-        console.log("Room created - States synced:", {
-            AppState: { roomId: AppState.roomId, isCreator: AppState.isRoomCreator },
-            CM: { roomId: ConnectionManager.roomId, isCreator: ConnectionManager.isRoomCreator }
-        });
+        // Sync state after a short delay to ensure ConnectionManager has had time to process
+        setTimeout(() => {
+            AppState.roomId = ConnectionManager.roomId;
+            AppState.isRoomCreator = ConnectionManager.isRoomCreator;
+            
+            console.log('[App] Room created, state synchronized:', {
+                roomId: AppState.roomId,
+                isRoomCreator: AppState.isRoomCreator
+            });
+        }, 500);
     } else {
+        console.error('[App] ConnectionManager not initialized');
         alert('Connection manager not initialized. Please refresh the page and try again.');
     }
 }
 
 /**
- * Join an existing room
+ * Join an existing room with improved handling
  * Now delegated to ConnectionManager
  */
 function joinRoom() {
+    console.log('[App] Joining room');
+    
     const roomId = elements.roomIdInput.value.trim();
     if (!roomId) {
         alert('Please enter a Room ID to join.');
@@ -237,12 +279,18 @@ function joinRoom() {
     if (typeof ConnectionManager !== 'undefined') {
         ConnectionManager.joinRoom(roomId);
         
-        // Sync state
+        // Sync state after a short delay to ensure ConnectionManager has had time to process
         setTimeout(() => {
             AppState.roomId = ConnectionManager.roomId;
             AppState.isRoomCreator = ConnectionManager.isRoomCreator;
+            
+            console.log('[App] Room joined, state synchronized:', {
+                roomId: AppState.roomId,
+                isRoomCreator: AppState.isRoomCreator
+            });
         }, 500);
     } else {
+        console.error('[App] ConnectionManager not initialized');
         alert('Connection manager not initialized. Please refresh the page and try again.');
     }
 }
@@ -251,6 +299,8 @@ function joinRoom() {
  * Show invite modal with link
  */
 function showInviteModal() {
+    console.log('[App] Showing invite modal');
+    
     if (!AppState.roomId) {
         alert('Please create a room first.');
         return;
@@ -306,13 +356,13 @@ function copyInviteLink() {
 }
 
 /**
- * Handle messages from peers 
+ * Handle messages from peers with improved routing
  * Main handler that routes messages to the right place
  */
 function handlePeerMessage(peerId, data) {
     if (!data || !data.type) return;
     
-    console.log('Received peer message:', data);
+    console.log('[App] Received peer message:', data);
     
     switch (data.type) {
         case 'game_type':
@@ -335,6 +385,8 @@ function handlePeerMessage(peerId, data) {
  * Show privacy policy modal
  */
 function showPrivacyPolicy() {
+    console.log('[App] Showing privacy policy');
+    
     const modalHtml = `
         <div id="policy-modal" class="modal" style="display: flex;">
             <div class="modal-content">
@@ -379,6 +431,8 @@ function showPrivacyPolicy() {
  * Show about modal
  */
 function showAbout() {
+    console.log('[App] Showing about information');
+    
     const modalHtml = `
         <div id="about-modal" class="modal" style="display: flex;">
             <div class="modal-content">
@@ -419,8 +473,11 @@ function showAbout() {
  * Check for saved player name in cookies
  */
 function checkSavedPlayerName() {
+    console.log('[App] Checking for saved player name');
+    
     const savedName = getCookie('playerName');
     if (savedName) {
+        console.log(`[App] Found saved player name: ${savedName}`);
         elements.playerNameInput.value = savedName;
     }
 }
@@ -429,6 +486,7 @@ function checkSavedPlayerName() {
  * Save player name to cookie
  */
 function savePlayerName(name) {
+    console.log(`[App] Saving player name: ${name}`);
     setCookie('playerName', name, 30); // Save for 30 days
 }
 
@@ -436,6 +494,8 @@ function savePlayerName(name) {
  * Update player display in header
  */
 function updatePlayerDisplay() {
+    console.log('[App] Updating player display');
+    
     elements.playerDisplay.innerHTML = `
         <span>${AppState.playerName}</span>
         <button id="change-name-button" class="small-button" title="Change Name">
@@ -454,6 +514,8 @@ function updatePlayerDisplay() {
  * Show dialog to change player name
  */
 function showChangeNameDialog() {
+    console.log('[App] Showing change name dialog');
+    
     // Only allow name change if not in a room
     if (AppState.roomId) {
         alert('You cannot change your name while in a room.');
@@ -462,9 +524,17 @@ function showChangeNameDialog() {
     
     const newName = prompt('Enter your new name:', AppState.playerName);
     if (newName && newName.trim()) {
-        savePlayerName(newName.trim());
-        AppState.playerName = newName.trim();
+        const trimmedName = newName.trim();
+        savePlayerName(trimmedName);
+        AppState.playerName = trimmedName;
         updatePlayerDisplay();
+        
+        // Update ConnectionManager if available
+        if (typeof ConnectionManager !== 'undefined') {
+            ConnectionManager.playerName = trimmedName;
+        }
+        
+        console.log(`[App] Player name changed to: ${trimmedName}`);
     }
 }
 
@@ -504,9 +574,14 @@ function generateRandomId() {
  * Register available game modules
  */
 function registerGameModules() {
+    console.log('[App] Registering game modules');
+    
     // Register Minesweeper
     if (typeof MinesweeperGame !== 'undefined') {
         AppState.gameModules['minesweeper'] = MinesweeperGame;
+        console.log('[App] Registered Minesweeper game module');
+    } else {
+        console.warn('[App] MinesweeperGame module not found');
     }
     
     // Additional games can be registered here in the future
@@ -516,6 +591,8 @@ function registerGameModules() {
  * Set up event listeners for the application
  */
 function setupEventListeners() {
+    console.log('[App] Setting up event listeners');
+    
     // Player name entry
     elements.continueButton.addEventListener('click', handlePlayerNameSubmit);
     elements.playerNameInput.addEventListener('keypress', e => {
@@ -565,10 +642,11 @@ function setupEventListeners() {
 }
 
 /**
- * Handle player name submission and initialize connections
+ * Handle player name submission and initialize connections with improved state management
  */
-// In app.js - modify handlePlayerNameSubmit function
 function handlePlayerNameSubmit() {
+    console.log('[App] Handling player name submission');
+    
     const name = elements.playerNameInput.value.trim();
     if (name) {
         savePlayerName(name);
@@ -578,6 +656,8 @@ function handlePlayerNameSubmit() {
         
         // Initialize ConnectionManager if available
         if (typeof ConnectionManager !== 'undefined') {
+            console.log('[App] Initializing ConnectionManager with name:', name);
+            
             ConnectionManager.init({
                 playerName: name
             });
@@ -587,24 +667,43 @@ function handlePlayerNameSubmit() {
             
             // Set up sync for roomId and isRoomCreator
             const syncStates = () => {
-                AppState.roomId = ConnectionManager.roomId;
-                AppState.isRoomCreator = ConnectionManager.isRoomCreator;
+                if (ConnectionManager.roomId) {
+                    AppState.roomId = ConnectionManager.roomId;
+                    AppState.isRoomCreator = ConnectionManager.isRoomCreator;
+                }
                 
-                // Check if values are synced properly
-                console.log("State sync: ", {
-                    CM_roomId: ConnectionManager.roomId,
-                    App_roomId: AppState.roomId,
-                    CM_isCreator: ConnectionManager.isRoomCreator,
-                    App_isCreator: AppState.isRoomCreator
-                });
+                // Update players from ConnectionManager
+                if (Object.keys(ConnectionManager.players).length > 0) {
+                    AppState.players = {...ConnectionManager.players};
+                }
             };
             
-            // Run the sync now and set up an interval to ensure they stay in sync
+            // Initial sync
             syncStates();
+            
+            // Set up periodic sync to ensure state consistency
             setInterval(syncStates, 1000);
             
             // Show notification
             ConnectionManager.showNotification('Welcome, ' + name + '!', 'Select a game to start playing.', 'success');
+            
+            // Auto-join room if in URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomParam = urlParams.get('room');
+            if (roomParam) {
+                setTimeout(() => {
+                    console.log('[App] Auto-joining room from URL:', roomParam);
+                    ConnectionManager.joinRoom(roomParam);
+                }, 1000);
+            }
+        } else {
+            console.error('[App] ConnectionManager not available');
+            
+            // Generate a fallback ID
+            AppState.playerId = generateRandomId();
+            
+            // Show notification using a basic fallback
+            showBasicNotification('Welcome, ' + name + '!', 'Select a game to start playing.');
         }
     } else {
         alert('Please enter your name to continue.');
@@ -615,6 +714,8 @@ function handlePlayerNameSubmit() {
  * Basic notification fallback function
  */
 function showBasicNotification(title, message) {
+    console.log(`[App] Showing basic notification: ${title} - ${message}`);
+    
     const notification = document.createElement('div');
     notification.style.cssText = 'position:fixed;top:20px;right:20px;background:#4a6fa5;color:white;padding:15px;border-radius:5px;box-shadow:0 4px 8px rgba(0,0,0,0.2);z-index:9999;';
     notification.innerHTML = `<strong>${title}</strong><br>${message}`;
@@ -625,6 +726,41 @@ function showBasicNotification(title, message) {
         notification.style.transition = 'opacity 0.5s';
         setTimeout(() => notification.remove(), 500);
     }, 5000);
+}
+
+/**
+ * Sync app and connection manager states
+ * This ensures both components have consistent state
+ */
+function syncStates() {
+    console.log('[App] Syncing states between AppState and ConnectionManager');
+    
+    if (typeof ConnectionManager === 'undefined') {
+        console.warn('[App] ConnectionManager not available for state sync');
+        return;
+    }
+    
+    // Update AppState from ConnectionManager
+    AppState.playerId = ConnectionManager.playerId;
+    AppState.roomId = ConnectionManager.roomId;
+    AppState.isRoomCreator = ConnectionManager.isRoomCreator;
+    AppState.players = {...ConnectionManager.players};
+    
+    // Update ConnectionManager from AppState
+    ConnectionManager.playerName = AppState.playerName;
+    
+    // Update game module reference
+    if (AppState.currentGame && AppState.gameModules[AppState.currentGame]) {
+        ConnectionManager.gameModule = AppState.gameModules[AppState.currentGame];
+    }
+    
+    console.log('[App] State sync complete:', {
+        playerId: AppState.playerId,
+        roomId: AppState.roomId,
+        isRoomCreator: AppState.isRoomCreator,
+        playerCount: Object.keys(AppState.players).length,
+        currentGame: AppState.currentGame
+    });
 }
 
 // Initialize the app when DOM is loaded
