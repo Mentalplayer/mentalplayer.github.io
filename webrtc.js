@@ -81,11 +81,12 @@ const SimpleWebRTC = {
         onMessage: null,
         onError: null,
         onStatusChange: null,
-        onNewIceCandidate: null
+        onNewIceCandidate: null,
+        onReconnectAttempt: null // Added callback for reconnection attempts
     },
     
     /**
-     * Initialize WebRTC with improved logging
+     * Initialize WebRTC with improved callback handling
      * @param {Object} options Configuration options
      * @returns {string} Local ID
      */
@@ -96,6 +97,18 @@ const SimpleWebRTC = {
         if (options.config) {
             this.config = { ...this.config, ...options.config };
         }
+        
+        // Add onReconnectAttempt to callbacks
+        this.callbacks = { 
+            onConnected: null,
+            onDisconnected: null,
+            onMessage: null,
+            onError: null,
+            onStatusChange: null,
+            onNewIceCandidate: null,
+            onReconnectAttempt: null,
+            ...this.callbacks
+        };
         
         if (options.callbacks) {
             this.callbacks = { ...this.callbacks, ...options.callbacks };
@@ -113,6 +126,7 @@ const SimpleWebRTC = {
         this.state.offerCreated = false;
         this.state.answerReceived = false;
         this.state.pendingCandidates = [];
+        this.state.retryCount = 0;
         
         // Update status
         this.updateStatus('initialized', 'WebRTC initialized');
@@ -732,34 +746,92 @@ const SimpleWebRTC = {
                         this.handleReconnect();
                     }
                 }
+                
+                // Process any pending ICE candidates if remote description is set
+                if (this.state.pendingCandidates.length > 0 && 
+                    this.state.connection.remoteDescription) {
+                    this.processPendingCandidates();
+                }
             }
         }, 2000);
     },
     
     /**
-     * Handle reconnection attempts with improved logging
+     * Handle reconnection attempts with improved logic for both sides
      */
     handleReconnect: function() {
-        // Only attempt reconnect if we've successfully connected before
+        // Only attempt reconnect if we've been connected before
         if (this.state.offerCreated || this.state.answerReceived) {
             if (this.state.retryCount < this.state.maxRetries) {
                 this.state.retryCount++;
                 console.log('[SimpleWebRTC] Attempting reconnection, attempt', this.state.retryCount);
                 this.updateStatus('connecting', `Reconnecting (attempt ${this.state.retryCount})...`);
                 
+                // Use exponential backoff for retry timing
+                const backoffTime = Math.min(1000 * Math.pow(2, this.state.retryCount - 1), 8000);
+                
                 // Try to reconnect after a delay
                 setTimeout(() => {
                     if (this.state.isInitiator) {
                         console.log('[SimpleWebRTC] Reinitializing connection as initiator');
                         this.createConnection();
+                    } else if (this.state.peerId) {
+                        // For responder, we need to attempt to rejoin if we have the peer ID
+                        console.log('[SimpleWebRTC] Attempting to reconnect as responder');
+                        
+                        // Emit a reconnect event that the application can handle
+                        if (this.callbacks.onReconnectAttempt) {
+                            this.callbacks.onReconnectAttempt(this.state.peerId);
+                        } else {
+                            // If no callback is defined, at least notify the user
+                            this.updateStatus('connecting', 'Connection lost. Try rejoining the room.');
+                        }
                     }
-                }, 2000);
+                }, backoffTime);
             } else {
                 console.error('[SimpleWebRTC] Maximum reconnection attempts reached');
                 this.updateStatus('error', 'Reconnection failed');
                 this.handleError('Maximum reconnection attempts reached', null);
             }
         }
+    },
+    
+    /**
+     * Process pending ICE candidates with improved error handling
+     * @returns {Promise<number>} Number of processed candidates
+     */
+    processPendingCandidates: async function() {
+        if (this.state.pendingCandidates.length === 0 || !this.state.connection) {
+            return 0;
+        }
+        
+        console.log('[SimpleWebRTC] Processing', this.state.pendingCandidates.length, 'pending ICE candidates');
+        
+        let processedCount = 0;
+        // Process any pending candidates with better error handling
+        for (const candidate of this.state.pendingCandidates) {
+            try {
+                if (this.state.connection.remoteDescription) {
+                    await this.state.connection.addIceCandidate(new RTCIceCandidate(candidate));
+                    processedCount++;
+                } else {
+                    console.warn('[SimpleWebRTC] Remote description not set, cannot add candidate yet');
+                    break; // Stop processing if remoteDescription isn't set yet
+                }
+            } catch (e) {
+                console.warn('[SimpleWebRTC] Error adding pending ICE candidate:', e);
+            }
+        }
+        
+        // Only remove the candidates we've processed
+        if (processedCount > 0) {
+            this.state.pendingCandidates = this.state.pendingCandidates.slice(processedCount);
+        }
+        
+        console.log('[SimpleWebRTC] Processed', processedCount, 'pending ICE candidates,', 
+            this.state.pendingCandidates.length, 'remaining');
+        
+        return processedCount;
     },
     
     /**
@@ -884,35 +956,6 @@ const SimpleWebRTC = {
             console.error('[SimpleWebRTC] Error adding remote ICE candidate:', error);
             return false;
         }
-    },
-    
-    /**
-     * Process any pending ICE candidates
-     * @returns {Promise<number>} Number of processed candidates
-     */
-    processPendingCandidates: async function() {
-        if (this.state.pendingCandidates.length === 0 || !this.state.connection) {
-            return 0;
-        }
-        
-        console.log('[SimpleWebRTC] Processing', this.state.pendingCandidates.length, 'pending ICE candidates');
-        
-        let processedCount = 0;
-        // Process any pending candidates
-        for (const candidate of this.state.pendingCandidates) {
-            try {
-                await this.state.connection.addIceCandidate(new RTCIceCandidate(candidate));
-                processedCount++;
-            } catch (e) {
-                console.warn('[SimpleWebRTC] Error adding pending ICE candidate:', e);
-            }
-        }
-        
-        // Clear pending candidates
-        this.state.pendingCandidates = [];
-        console.log('[SimpleWebRTC] Processed', processedCount, 'pending ICE candidates');
-        
-        return processedCount;
     },
     
     /**

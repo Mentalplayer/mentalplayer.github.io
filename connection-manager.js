@@ -58,7 +58,8 @@ const ConnectionManager = {
                 onMessage: (message) => this.handleMessage(message),
                 onError: (message, error) => this.handleError(message, error),
                 onStatusChange: (status, message) => this.updateConnectionStatus(status, message),
-                onNewIceCandidate: (candidate) => this.handleNewIceCandidate(candidate)
+                onNewIceCandidate: (candidate) => this.handleNewIceCandidate(candidate),
+                onReconnectAttempt: (peerId) => this.handleReconnectAttempt(peerId)
             }
         });
         
@@ -114,8 +115,8 @@ const ConnectionManager = {
         AppState.players = this.players;
         
         // Set game module if AppState has a current game
-        if (AppState.currentGame && typeof GameModules !== 'undefined' && GameModules[AppState.currentGame]) {
-            this.gameModule = GameModules[AppState.currentGame];
+        if (AppState.currentGame && typeof AppState.gameModules !== 'undefined' && AppState.gameModules[AppState.currentGame]) {
+            this.gameModule = AppState.gameModules[AppState.currentGame];
         }
         
         console.log('[ConnectionManager] State synchronized with AppState:', {
@@ -300,6 +301,27 @@ const ConnectionManager = {
         } catch (error) {
             console.error('[ConnectionManager] Error joining room:', error);
             this.showNotification('Connection Error', 'Error joining room: ' + error.message, 'error');
+        }
+    },
+    
+    /**
+     * Handle reconnection attempts from SimpleWebRTC
+     * @param {string} peerId Peer ID to reconnect to
+     */
+    handleReconnectAttempt: function(peerId) {
+        console.log('[ConnectionManager] Attempting to reconnect to peer:', peerId);
+        this.showNotification('Connection Issue', 'Attempting to reconnect...', 'warning');
+        
+        // If we're the responder, we need to try re-joining the room
+        if (!this.isRoomCreator && this.roomId) {
+            // Wait a moment and try to rejoin
+            setTimeout(() => {
+                const roomIdInput = document.getElementById('room-id');
+                if (roomIdInput) {
+                    roomIdInput.value = this.roomId;
+                }
+                this.showManualConnectionInput(this.roomId);
+            }, 2000);
         }
     },
     
@@ -1197,7 +1219,8 @@ const ConnectionManager = {
                 onMessage: (message) => this.handleMessage(message),
                 onError: (message, error) => this.handleError(message, error),
                 onStatusChange: (status, message) => this.updateConnectionStatus(status, message),
-                onNewIceCandidate: (candidate) => this.handleNewIceCandidate(candidate)
+                onNewIceCandidate: (candidate) => this.handleNewIceCandidate(candidate),
+                onReconnectAttempt: (peerId) => this.handleReconnectAttempt(peerId)
             }
         });
         
@@ -1210,7 +1233,37 @@ const ConnectionManager = {
      * @param {string} senderId Sender ID or 'system'
      * @param {string} text Message text
      */
-);
+    addChatMessage: function(senderId, text) {
+        console.log(`[ConnectionManager] Adding chat message from ${senderId}: ${text}`);
+        
+        const isSystem = senderId === 'system';
+        const chatMessages = document.getElementById('chat-messages');
+        
+        if (!chatMessages) {
+            console.warn('[ConnectionManager] Chat messages container not found');
+            return;
+        }
+        
+        const messageElement = document.createElement('div');
+        messageElement.className = isSystem ? 'system-message' : 
+            (senderId === this.playerId ? 'chat-message own-message' : 'chat-message peer-message');
+        
+        let messageContent = '';
+        
+        // Add sender name for peer messages
+        if (!isSystem && senderId !== this.playerId) {
+            const senderName = this.players[senderId] ? this.players[senderId].name : 'Unknown Player';
+            const senderColor = this.players[senderId] && this.players[senderId].color ? 
+                this.players[senderId].color : '#808080';
+                
+            messageContent += `<div class="message-sender" style="color: ${senderColor}">${senderName}</div>`;
+        }
+        
+        // Add message text
+        messageContent += `<div class="message-text">${text}</div>`;
+        
+        messageElement.innerHTML = messageContent;
+        chatMessages.appendChild(messageElement);
         
         // Scroll to bottom
         chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -1220,3 +1273,105 @@ const ConnectionManager = {
             this.playNotificationSound();
         }
     },
+    
+    /**
+     * Play notification sound for new messages
+     */
+    playNotificationSound: function() {
+        try {
+            // Create a simple beep sound
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(440, audioContext.currentTime); // A4 note
+            gainNode.gain.setValueAtTime(0.1, audioContext.currentTime); // Low volume
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.1); // Short beep
+        } catch (e) {
+            console.warn('[ConnectionManager] Could not play notification sound:', e);
+        }
+    },
+    
+    /**
+     * Copy text to clipboard
+     * @param {string} text Text to copy
+     */
+    copyToClipboard: function(text) {
+        const textarea = document.createElement('textarea');
+        textarea.textContent = text;
+        textarea.style.position = 'fixed';
+        document.body.appendChild(textarea);
+        textarea.select();
+        
+        try {
+            document.execCommand('copy');
+        } catch (ex) {
+            console.warn('[ConnectionManager] Copy to clipboard failed:', ex);
+        } finally {
+            document.body.removeChild(textarea);
+        }
+    },
+    
+    /**
+     * Show notification
+     * @param {string} title Notification title
+     * @param {string} message Notification message
+     * @param {string} type Notification type (info, success, warning, error)
+     */
+    showNotification: function(title, message, type = 'info') {
+        console.log(`[ConnectionManager] Showing notification: ${title} - ${message} (${type})`);
+        
+        // Create container if not exists
+        let container = document.getElementById('notification-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'notification-container';
+            document.body.appendChild(container);
+        }
+        
+        // Create notification
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.innerHTML = `
+            <div class="notification-header">
+                <div class="notification-title">${title}</div>
+                <button class="notification-close">&times;</button>
+            </div>
+            <div class="notification-body">
+                <p>${message}</p>
+            </div>
+        `;
+        
+        // Add to container
+        container.appendChild(notification);
+        
+        // Add close handler
+        notification.querySelector('.notification-close').addEventListener('click', () => {
+            notification.classList.add('notification-hiding');
+            setTimeout(() => notification.remove(), 300);
+        });
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.classList.add('notification-hiding');
+                setTimeout(() => notification.remove(), 300);
+            }
+        }, 5000);
+    },
+    
+    /**
+     * Get a random color for player identification
+     */
+    getRandomColor: function() {
+        // Generate vibrant colors that are easily distinguishable
+        const hue = Math.floor(Math.random() * 360);
+        return `hsl(${hue}, 70%, 60%)`;
+    }
+};

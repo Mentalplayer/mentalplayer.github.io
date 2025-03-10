@@ -2,6 +2,7 @@
  * Mentalplayer - Minesweeper Game Module
  * 
  * Implements the classic Minesweeper game with multiplayer features.
+ * Includes improved game state transmission for reliable synchronization.
  */
 
 const MinesweeperGame = (function() {
@@ -19,6 +20,11 @@ const MinesweeperGame = (function() {
     let timerValue = 0;
     let lastClickedCell = null;
     
+    // Storage for game state synchronization
+    let pendingGameState = null;
+    let receivedBoardChunks = {};
+    let receivedMineLocations = null;
+    
     // DOM elements
     const board = document.getElementById('minesweeper-board');
     const mineCountDisplay = document.querySelector('.mine-count');
@@ -35,6 +41,8 @@ const MinesweeperGame = (function() {
      * Initialize the Minesweeper game
      */
     function init() {
+        console.log('[MinesweeperGame] Initializing game...');
+        
         setupEventListeners();
         reset();
     }
@@ -44,78 +52,119 @@ const MinesweeperGame = (function() {
      */
     function setupEventListeners() {
         // Reset button
-        resetButton.addEventListener('click', () => {
-            if (AppState.isRoomCreator) {
-                reset();
-            } else {
-                alert('Only the room creator can start a new game.');
-            }
-        });
+        if (resetButton) {
+            resetButton.addEventListener('click', () => {
+                if (AppState.isRoomCreator) {
+                    reset();
+                    
+                    // Broadcast reset to other players
+                    if (typeof ConnectionManager !== 'undefined') {
+                        ConnectionManager.sendData({
+                            type: 'game_data',
+                            data: {
+                                action: 'reset',
+                                difficulty: difficultySelect ? difficultySelect.value : 'intermediate'
+                            }
+                        });
+                    }
+                } else {
+                    alert('Only the room creator can start a new game.');
+                }
+            });
+        }
         
         // New game button in modal
-        newGameButton.addEventListener('click', () => {
-            gameOverModal.style.display = 'none';
-            if (AppState.isRoomCreator) {
-                reset();
-            }
-        });
+        if (newGameButton) {
+            newGameButton.addEventListener('click', () => {
+                if (gameOverModal) gameOverModal.style.display = 'none';
+                if (AppState.isRoomCreator) {
+                    reset();
+                }
+            });
+        }
         
         // Difficulty select
-        difficultySelect.addEventListener('change', () => {
-            const difficulty = difficultySelect.value;
-            
-            switch (difficulty) {
-                case 'beginner':
-                    rows = 9;
-                    cols = 9;
-                    mineCount = 10;
-                    break;
-                case 'intermediate':
-                    rows = 16;
-                    cols = 16;
-                    mineCount = 40;
-                    break;
-                case 'expert':
-                    rows = 16;
-                    cols = 30;
-                    mineCount = 99;
-                    break;
-            }
-            
-            if (AppState.isRoomCreator && gameStarted) {
-                // Ask for confirmation if game is in progress
-                if (confirm('Changing difficulty will start a new game. Continue?')) {
+        if (difficultySelect) {
+            difficultySelect.addEventListener('change', () => {
+                const difficulty = difficultySelect.value;
+                
+                switch (difficulty) {
+                    case 'beginner':
+                        rows = 9;
+                        cols = 9;
+                        mineCount = 10;
+                        break;
+                    case 'intermediate':
+                        rows = 16;
+                        cols = 16;
+                        mineCount = 40;
+                        break;
+                    case 'expert':
+                        rows = 16;
+                        cols = 30;
+                        mineCount = 99;
+                        break;
+                }
+                
+                if (AppState.isRoomCreator && gameStarted) {
+                    // Ask for confirmation if game is in progress
+                    if (confirm('Changing difficulty will start a new game. Continue?')) {
+                        reset();
+                        
+                        // Broadcast difficulty change
+                        if (typeof ConnectionManager !== 'undefined') {
+                            ConnectionManager.sendData({
+                                type: 'game_data',
+                                data: {
+                                    action: 'difficulty_change',
+                                    difficulty: difficulty
+                                }
+                            });
+                        }
+                    } else {
+                        // Reset to current difficulty
+                        const currentDifficulty = 
+                            rows === 9 && cols === 9 ? 'beginner' :
+                            rows === 16 && cols === 16 ? 'intermediate' : 'expert';
+                        difficultySelect.value = currentDifficulty;
+                    }
+                } else if (AppState.isRoomCreator) {
                     reset();
+                    
+                    // Broadcast difficulty change
+                    if (typeof ConnectionManager !== 'undefined') {
+                        ConnectionManager.sendData({
+                            type: 'game_data',
+                            data: {
+                                action: 'difficulty_change',
+                                difficulty: difficulty
+                            }
+                        });
+                    }
                 } else {
+                    alert('Only the room creator can change difficulty.');
+                    
                     // Reset to current difficulty
                     const currentDifficulty = 
                         rows === 9 && cols === 9 ? 'beginner' :
                         rows === 16 && cols === 16 ? 'intermediate' : 'expert';
                     difficultySelect.value = currentDifficulty;
                 }
-            } else if (AppState.isRoomCreator) {
-                reset();
-            } else {
-                alert('Only the room creator can change difficulty.');
-                
-                // Reset to current difficulty
-                const currentDifficulty = 
-                    rows === 9 && cols === 9 ? 'beginner' :
-                    rows === 16 && cols === 16 ? 'intermediate' : 'expert';
-                difficultySelect.value = currentDifficulty;
-            }
-        });
+            });
+        }
     }
     
     /**
      * Reset the game
      */
     function reset() {
+        console.log('[MinesweeperGame] Resetting game');
+        
         // Reset game state
         gameStarted = false;
         gameOver = false;
         revealedCount = 0;
-        resetButton.textContent = '😊';
+        if (resetButton) resetButton.textContent = '😊';
         
         // Stop timer if running
         if (timerInterval) {
@@ -137,9 +186,14 @@ const MinesweeperGame = (function() {
         // Initialize mines (will be placed on first click)
         mineLocations = [];
         
+        // Reset sync storage
+        pendingGameState = null;
+        receivedBoardChunks = {};
+        receivedMineLocations = null;
+        
         // If room creator, broadcast new game to all peers
-        if (AppState.isRoomCreator) {
-            broadcastToPeers({
+        if (AppState.isRoomCreator && typeof ConnectionManager !== 'undefined') {
+            ConnectionManager.sendData({
                 type: 'minesweeper_new_game',
                 rows: rows,
                 cols: cols,
@@ -152,6 +206,11 @@ const MinesweeperGame = (function() {
      * Create the game board
      */
     function createBoard() {
+        if (!board) {
+            console.warn('[MinesweeperGame] Board element not found');
+            return;
+        }
+        
         // Clear the board
         board.innerHTML = '';
         
@@ -221,6 +280,15 @@ const MinesweeperGame = (function() {
                 }
             }
         }
+        
+        // Send mine locations to other players if room creator
+        if (AppState.isRoomCreator && typeof ConnectionManager !== 'undefined') {
+            ConnectionManager.sendData({
+                type: 'minesweeper_mines_placed',
+                mineLocations: mineLocations,
+                firstCell: { row: firstRow, col: firstCol }
+            });
+        }
     }
     
     /**
@@ -248,12 +316,14 @@ const MinesweeperGame = (function() {
         const col = parseInt(cell.dataset.col);
         
         // Send click to peers
-        broadcastToPeers({
-            type: 'minesweeper_cell_click',
-            row: row,
-            col: col,
-            isRightClick: false
-        });
+        if (typeof ConnectionManager !== 'undefined') {
+            ConnectionManager.sendData({
+                type: 'minesweeper_cell_click',
+                row: row,
+                col: col,
+                isRightClick: false
+            });
+        }
         
         // Process click
         processCellClick(row, col, false);
@@ -271,12 +341,14 @@ const MinesweeperGame = (function() {
         const col = parseInt(cell.dataset.col);
         
         // Send right click to peers
-        broadcastToPeers({
-            type: 'minesweeper_cell_click',
-            row: row,
-            col: col,
-            isRightClick: true
-        });
+        if (typeof ConnectionManager !== 'undefined') {
+            ConnectionManager.sendData({
+                type: 'minesweeper_cell_click',
+                row: row,
+                col: col,
+                isRightClick: true
+            });
+        }
         
         // Process right click
         processCellClick(row, col, true);
@@ -301,18 +373,32 @@ const MinesweeperGame = (function() {
         const row = parseInt(cell.dataset.row);
         const col = parseInt(cell.dataset.col);
         
-        broadcastToPeers({
-            type: 'minesweeper_cursor',
-            row: row,
-            col: col
-        });
+        if (typeof ConnectionManager !== 'undefined') {
+            ConnectionManager.sendData({
+                type: 'minesweeper_cursor',
+                row: row,
+                col: col
+            });
+        }
     }
     
     /**
      * Process cell click (both local and remote)
      */
     function processCellClick(row, col, isRightClick) {
+        if (gameOver) return;
+        
+        // Validate row and column
+        if (row < 0 || row >= rows || col < 0 || col >= cols) {
+            console.warn('[MinesweeperGame] Invalid cell coordinates:', row, col);
+            return;
+        }
+        
         const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+        if (!cell) {
+            console.warn('[MinesweeperGame] Cell element not found:', row, col);
+            return;
+        }
         
         // Start game on first click
         if (!gameStarted) {
@@ -400,7 +486,9 @@ const MinesweeperGame = (function() {
                     if (r === row && c === col) continue;
                     if (!boardState[r][c].isRevealed && !boardState[r][c].isFlagged) {
                         const neighborCell = document.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
-                        revealCell(neighborCell, r, c, false);
+                        if (neighborCell) {
+                            revealCell(neighborCell, r, c, false);
+                        }
                     }
                 }
             }
@@ -417,6 +505,7 @@ const MinesweeperGame = (function() {
      * Start game on first click
      */
     function startGame(firstRow, firstCol) {
+        console.log('[MinesweeperGame] Starting game...');
         gameStarted = true;
         
         // Place mines (avoiding first click)
@@ -424,6 +513,13 @@ const MinesweeperGame = (function() {
         
         // Start timer
         startTimer();
+        
+        // Notify other players that game has started
+        if (typeof ConnectionManager !== 'undefined') {
+            ConnectionManager.sendData({
+                type: 'minesweeper_game_started'
+            });
+        }
     }
     
     /**
@@ -433,6 +529,14 @@ const MinesweeperGame = (function() {
         timerInterval = setInterval(() => {
             timerValue++;
             updateTimerDisplay();
+            
+            // Sync timer with other players every 5 seconds
+            if (timerValue % 5 === 0 && AppState.isRoomCreator && typeof ConnectionManager !== 'undefined') {
+                ConnectionManager.sendData({
+                    type: 'minesweeper_timer_sync',
+                    timerValue: timerValue
+                });
+            }
         }, 1000);
     }
     
@@ -440,14 +544,18 @@ const MinesweeperGame = (function() {
      * Update timer display
      */
     function updateTimerDisplay() {
-        timerDisplay.textContent = timerValue.toString().padStart(3, '0');
+        if (timerDisplay) {
+            timerDisplay.textContent = timerValue.toString().padStart(3, '0');
+        }
     }
     
     /**
      * Update mine count display
      */
     function updateMineCount() {
-        mineCountDisplay.textContent = remainingMines.toString().padStart(3, '0');
+        if (mineCountDisplay) {
+            mineCountDisplay.textContent = remainingMines.toString().padStart(3, '0');
+        }
     }
     
     /**
@@ -461,7 +569,9 @@ const MinesweeperGame = (function() {
         }
         
         // Update reset button face
-        resetButton.textContent = isWin ? '😎' : '😵';
+        if (resetButton) {
+            resetButton.textContent = isWin ? '😎' : '😵';
+        }
         
         // Reveal all mines
         if (!isWin) {
@@ -471,11 +581,20 @@ const MinesweeperGame = (function() {
         // Show game over modal
         showGameOverModal(isWin);
         
-        // Send game over message to chat
-        addChatMessage('system', isWin ? 
-            `Game over! The team cleared all mines in ${timerValue} seconds! 🎉` :
-            `Game over! The team hit a mine. Better luck next time! 💣`
-        );
+        // Send game over message
+        if (typeof ConnectionManager !== 'undefined') {
+            ConnectionManager.sendData({
+                type: 'minesweeper_game_over',
+                isWin: isWin,
+                timerValue: timerValue
+            });
+            
+            // Add message to chat
+            ConnectionManager.addChatMessage('system', isWin ? 
+                `Game over! The team cleared all mines in ${timerValue} seconds! 🎉` :
+                `Game over! The team hit a mine. Better luck next time! 💣`
+            );
+        }
     }
     
     /**
@@ -485,15 +604,15 @@ const MinesweeperGame = (function() {
         mineLocations.forEach(loc => {
             const cell = document.querySelector(`.cell[data-row="${loc.row}"][data-col="${loc.col}"]`);
             
-            if (!boardState[loc.row][loc.col].isRevealed) {
+            if (cell && !boardState[loc.row][loc.col].isRevealed) {
                 cell.classList.add('revealed');
                 cell.classList.add('mine');
                 cell.textContent = '💣';
-            }
-            
-            // Mark incorrectly flagged cells
-            if (boardState[loc.row][loc.col].isFlagged) {
-                cell.classList.remove('flagged');
+                
+                // Remove flag if present
+                if (boardState[loc.row][loc.col].isFlagged) {
+                    cell.classList.remove('flagged');
+                }
             }
         });
         
@@ -502,8 +621,10 @@ const MinesweeperGame = (function() {
             for (let c = 0; c < cols; c++) {
                 if (boardState[r][c].isFlagged && !boardState[r][c].isMine) {
                     const cell = document.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
-                    cell.classList.add('revealed');
-                    cell.textContent = '❌';
+                    if (cell) {
+                        cell.classList.add('revealed');
+                        cell.textContent = '❌';
+                    }
                 }
             }
         }
@@ -513,10 +634,12 @@ const MinesweeperGame = (function() {
      * Show game over modal
      */
     function showGameOverModal(isWin) {
+        if (!gameOverModal || !gameResultTitle || !gameMessage) return;
+        
         gameResultTitle.textContent = isWin ? 'You Win!' : 'Game Over';
         gameMessage.textContent = isWin ? 
-            `Congratulations! You cleared all mines in ${timerValue} seconds.` : 
-            'You hit a mine! Better luck next time.';
+            `Congratulations! The team cleared all mines in ${timerValue} seconds.` : 
+            'The team hit a mine! Better luck next time.';
         
         gameOverModal.style.display = 'flex';
     }
@@ -538,7 +661,7 @@ const MinesweeperGame = (function() {
             cell.classList.add(`remote-cursor-${peerId}`);
             
             // Apply player color as outline
-            if (AppState.players[peerId]) {
+            if (typeof AppState !== 'undefined' && AppState.players[peerId]) {
                 cell.style.outline = `2px solid ${AppState.players[peerId].color}`;
                 cell.style.outlineOffset = "-2px";
             }
@@ -553,98 +676,147 @@ const MinesweeperGame = (function() {
         }
     }
     
-    // Store received board chunks for assembly
-    let receivedBoardChunks = {};
-    let receivedMineLocations = null;
-    let pendingGameState = null;
-    
     /**
-     * Handle messages from peers specific to Minesweeper
+     * Send complete game state to a peer with improved chunking
      */
-    function handlePeerMessage(peerId, data) {
+    function sendGameState(conn) {
         try {
-            switch (data.type) {
-                case 'minesweeper_cell_click':
-                    processCellClick(data.row, data.col, data.isRightClick);
-                    break;
-                    
-                case 'minesweeper_new_game':
-                    if (!AppState.isRoomCreator) {
-                        rows = data.rows;
-                        cols = data.cols;
-                        mineCount = data.mineCount;
-                        reset();
+            console.log('[MinesweeperGame] Sending game state to peer...');
+            
+            // First send basic game configuration
+            conn.send({
+                type: 'minesweeper_game_state',
+                rows: rows,
+                cols: cols,
+                mineCount: mineCount,
+                remainingMines: remainingMines,
+                gameStarted: gameStarted,
+                gameOver: gameOver,
+                timerValue: timerValue,
+                difficulty: difficultySelect ? difficultySelect.value : 'intermediate',
+                timestamp: Date.now(),  // Add timestamp for ordering
+                sequence: 0,  // Start of sequence
+                totalChunks: Math.ceil((rows * cols) / 50) // Indicate how many chunks to expect
+            });
+            
+            // Then send board state in chunks with sequence numbers
+            const chunkSize = 50; // Number of cells to send in each chunk
+            const totalCells = rows * cols;
+            const totalChunks = Math.ceil(totalCells / chunkSize);
+            
+            // Use a queue system to send chunks with controlled timing
+            let chunkIndex = 0;
+            
+            const sendNextChunk = () => {
+                if (chunkIndex >= totalChunks) {
+                    // All chunks sent, now send mine locations
+                    setTimeout(() => {
+                        conn.send({
+                            type: 'minesweeper_mine_locations',
+                            mineLocations: mineLocations,
+                            timestamp: Date.now(),
+                            sequence: totalChunks + 1  // End of sequence
+                        });
                         
-                        // Update difficulty selector
-                        const difficulty = 
-                            rows === 9 && cols === 9 ? 'beginner' :
-                            rows === 16 && cols === 16 ? 'intermediate' : 'expert';
-                        difficultySelect.value = difficulty;
-                    }
-                    break;
-                    
-                case 'minesweeper_cursor':
-                    updateRemoteCursor(peerId, data.row, data.col);
-                    break;
-                    
-                case 'minesweeper_game_state':
-                    if (!AppState.isRoomCreator) {
-                        // Store the game state settings and prepare for board chunks
-                        pendingGameState = data;
-                        receivedBoardChunks = {};
-                        receivedMineLocations = null;
-                        
-                        // Set basic game parameters immediately
-                        rows = data.rows;
-                        cols = data.cols;
-                        mineCount = data.mineCount;
-                        remainingMines = data.remainingMines;
-                        gameStarted = data.gameStarted;
-                        gameOver = data.gameOver;
-                        timerValue = data.timerValue;
-                        
-                        // Update difficulty selector
-                        difficultySelect.value = data.difficulty;
-                    }
-                    break;
-                    
-                case 'minesweeper_board_chunk':
-                    if (!AppState.isRoomCreator && pendingGameState) {
-                        // Store this chunk
-                        receivedBoardChunks[data.chunkIndex] = data.boardChunk;
-                        
-                        // Check if we have all chunks and the mine locations
-                        if (Object.keys(receivedBoardChunks).length === data.totalChunks && receivedMineLocations) {
-                            assembleAndApplyGameState();
+                        console.log('[MinesweeperGame] Game state transmission complete');
+                    }, 100);
+                    return;
+                }
+                
+                const chunkBoardState = [];
+                const startCell = chunkIndex * chunkSize;
+                const endCell = Math.min(startCell + chunkSize, totalCells);
+                
+                for (let cellIndex = startCell; cellIndex < endCell; cellIndex++) {
+                    const row = Math.floor(cellIndex / cols);
+                    const col = cellIndex % cols;
+                    chunkBoardState.push({
+                        row: row,
+                        col: col,
+                        state: {
+                            isRevealed: boardState[row][col].isRevealed,
+                            isFlagged: boardState[row][col].isFlagged
+                            // Don't send isMine or adjacentMines - these will be calculated from mineLocations
                         }
-                    }
-                    break;
-                    
-                case 'minesweeper_mine_locations':
-                    if (!AppState.isRoomCreator && pendingGameState) {
-                        receivedMineLocations = data.mineLocations;
-                        
-                        // Check if we have all board chunks
-                        if (Object.keys(receivedBoardChunks).length > 0 && 
-                            receivedBoardChunks[0].length > 0 && 
-                            receivedMineLocations) {
-                            assembleAndApplyGameState();
-                        }
-                    }
-                    break;
-            }
+                    });
+                }
+                
+                conn.send({
+                    type: 'minesweeper_board_chunk',
+                    chunkIndex: chunkIndex,
+                    totalChunks: totalChunks,
+                    boardChunk: chunkBoardState,
+                    timestamp: Date.now(),
+                    sequence: chunkIndex + 1  // Add sequence number
+                });
+                
+                console.log(`[MinesweeperGame] Sent chunk ${chunkIndex + 1}/${totalChunks}`);
+                
+                // Move to next chunk
+                chunkIndex++;
+                
+                // Schedule next chunk with a small delay to prevent overwhelming the connection
+                setTimeout(sendNextChunk, 50);
+            };
+            
+            // Start sending chunks after a short delay
+            setTimeout(sendNextChunk, 200);
+            
         } catch (error) {
-            console.error('Error handling peer message:', error, data);
+            console.error('[MinesweeperGame] Error sending game state:', error);
         }
     }
     
     /**
-     * Assemble and apply the complete game state from chunks
+     * Assemble and apply the complete game state from chunks with validation
      */
     function assembleAndApplyGameState() {
         if (!pendingGameState || !receivedMineLocations) return;
         
         try {
+            console.log('[MinesweeperGame] Assembling game state from chunks...');
+            
+            // Validate that we have all chunks and they match the expected total
+            const expectedTotalChunks = pendingGameState.totalChunks || 0;
+            const receivedChunks = Object.keys(receivedBoardChunks).map(Number);
+            
+            // Check for missing chunks
+            const missingChunks = [];
+            for (let i = 0; i < expectedTotalChunks; i++) {
+                if (!receivedChunks.includes(i)) {
+                    missingChunks.push(i);
+                }
+            }
+            
+            if (missingChunks.length > 0) {
+                console.warn('[MinesweeperGame] Missing chunks:', missingChunks);
+                // Request missing chunks
+                if (typeof ConnectionManager !== 'undefined' && ConnectionManager.sendData) {
+                    ConnectionManager.sendData({
+                        type: 'minesweeper_request_chunks',
+                        missingChunks: missingChunks
+                    });
+                    
+                    // Show notification to user
+                    if (ConnectionManager.showNotification) {
+                        ConnectionManager.showNotification(
+                            'Syncing Game', 
+                            'Requesting missing game data...', 
+                            'info'
+                        );
+                    }
+                }
+                
+                // Set a timeout to retry assembly after a delay
+                setTimeout(() => {
+                    if (pendingGameState) {
+                        assembleAndApplyGameState();
+                    }
+                }, 1000);
+                
+                return; // Wait for missing chunks
+            }
+            
             // Create the board first
             createBoard();
             
@@ -668,7 +840,7 @@ const MinesweeperGame = (function() {
             }
             
             // Apply all board chunks
-            const chunkIndices = Object.keys(receivedBoardChunks).sort((a, b) => a - b);
+            const chunkIndices = Object.keys(receivedBoardChunks).sort((a, b) => Number(a) - Number(b));
             for (const chunkIndex of chunkIndices) {
                 const chunk = receivedBoardChunks[chunkIndex];
                 for (const cell of chunk) {
@@ -722,7 +894,9 @@ const MinesweeperGame = (function() {
             
             if (gameOver) {
                 // Update reset button to show game over state
-                resetButton.textContent = revealedCount === (rows * cols - mineCount) ? '😎' : '😵';
+                if (resetButton) {
+                    resetButton.textContent = revealedCount === (rows * cols - mineCount) ? '😎' : '😵';
+                }
             }
             
             // Clear temporary storage
@@ -730,86 +904,324 @@ const MinesweeperGame = (function() {
             receivedBoardChunks = {};
             receivedMineLocations = null;
             
-            console.log('Game state successfully assembled and applied');
+            console.log('[MinesweeperGame] Game state successfully assembled and applied');
+            
+            // Show success notification
+            if (typeof ConnectionManager !== 'undefined' && ConnectionManager.showNotification) {
+                ConnectionManager.showNotification(
+                    'Game Synchronized', 
+                    'Game state successfully loaded.', 
+                    'success'
+                );
+            }
         } catch (error) {
-            console.error('Error assembling game state:', error);
-            alert('There was an error synchronizing the game state. You may need to rejoin the room.');
+            console.error('[MinesweeperGame] Error assembling game state:', error);
+            // More user-friendly error handling
+            if (typeof ConnectionManager !== 'undefined' && ConnectionManager.showNotification) {
+                ConnectionManager.showNotification('Sync Error', 'Error synchronizing game state. Attempting to recover...', 'warning');
+            } else {
+                alert('There was an error synchronizing the game state. You may need to rejoin the room.');
+            }
         }
     }
     
     /**
-     * Send complete game state to a peer
+     * Handle requests for missing chunks
      */
-    function sendGameState(conn) {
-        try {
-            // First send basic game configuration
-            conn.send({
-                type: 'minesweeper_game_state',
-                rows: rows,
-                cols: cols,
-                mineCount: mineCount,
-                remainingMines: remainingMines,
-                gameStarted: gameStarted,
-                gameOver: gameOver,
-                timerValue: timerValue,
-                difficulty: difficultySelect.value
-            });
+    function handleMissingChunksRequest(peerId, data) {
+        if (!data.missingChunks || !Array.isArray(data.missingChunks)) return;
+        
+        console.log('[MinesweeperGame] Received request for missing chunks:', data.missingChunks);
+        
+        // Only the room creator should respond to chunk requests
+        if (!AppState.isRoomCreator) return;
+        
+        if (!ConnectionManager || typeof ConnectionManager.sendData !== 'function') {
+            console.error('[MinesweeperGame] ConnectionManager not available for sending chunks');
+            return;
+        }
+        
+        // Re-send the requested chunks
+        for (const chunkIndex of data.missingChunks) {
+            const startCell = chunkIndex * 50; // Use same chunk size as in sendGameState
+            const endCell = Math.min(startCell + 50, rows * cols);
+            const chunkBoardState = [];
             
-            // Send a small delay to prevent overwhelming the connection
+            for (let cellIndex = startCell; cellIndex < endCell; cellIndex++) {
+                const row = Math.floor(cellIndex / cols);
+                const col = cellIndex % cols;
+                chunkBoardState.push({
+                    row: row,
+                    col: col,
+                    state: {
+                        isRevealed: boardState[row][col].isRevealed,
+                        isFlagged: boardState[row][col].isFlagged
+                    }
+                });
+            }
+            
+            // Add a small delay between sending chunks to prevent overwhelming the connection
             setTimeout(() => {
-                // Then send board state in chunks to prevent message size issues
-                const chunkSize = 50; // Number of cells to send in each chunk
-                const totalCells = rows * cols;
-                const totalChunks = Math.ceil(totalCells / chunkSize);
-                
-                for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-                    const chunkBoardState = [];
-                    const startCell = chunkIndex * chunkSize;
-                    const endCell = Math.min(startCell + chunkSize, totalCells);
+                ConnectionManager.sendData({
+                    type: 'minesweeper_board_chunk',
+                    chunkIndex: chunkIndex,
+                    totalChunks: Math.ceil(rows * cols / 50),
+                    boardChunk: chunkBoardState,
+                    timestamp: Date.now(),
+                    sequence: chunkIndex + 1,
+                    isResend: true // Mark as a resend
+                });
+                console.log(`[MinesweeperGame] Resent missing chunk ${chunkIndex}`);
+            }, chunkIndex * 50); // Stagger the resends
+        }
+    }
+    
+    /**
+     * Handle messages from peers specific to Minesweeper
+     */
+    function handlePeerMessage(peerId, data) {
+        try {
+            // Handle chunk request messages
+            if (data.type === 'minesweeper_request_chunks') {
+                handleMissingChunksRequest(peerId, data);
+                return;
+            }
+            
+            switch (data.type) {
+                case 'minesweeper_cell_click':
+                    processCellClick(data.row, data.col, data.isRightClick);
+                    break;
                     
-                    for (let cellIndex = startCell; cellIndex < endCell; cellIndex++) {
-                        const row = Math.floor(cellIndex / cols);
-                        const col = cellIndex % cols;
-                        chunkBoardState.push({
-                            row: row,
-                            col: col,
-                            state: boardState[row][col]
+                case 'minesweeper_new_game':
+                    if (!AppState.isRoomCreator) {
+                        rows = data.rows;
+                        cols = data.cols;
+                        mineCount = data.mineCount;
+                        reset();
+                        
+                        // Update difficulty selector
+                        const difficulty = 
+                            rows === 9 && cols === 9 ? 'beginner' :
+                            rows === 16 && cols === 16 ? 'intermediate' : 'expert';
+                        if (difficultySelect) difficultySelect.value = difficulty;
+                    }
+                    break;
+                    
+                case 'minesweeper_cursor':
+                    updateRemoteCursor(peerId, data.row, data.col);
+                    break;
+                    
+                case 'minesweeper_game_started':
+                    gameStarted = true;
+                    // Start timer for non-creators
+                    if (!AppState.isRoomCreator && !timerInterval) {
+                        startTimer();
+                    }
+                    break;
+                    
+                case 'minesweeper_mines_placed':
+                    if (!AppState.isRoomCreator) {
+                        // Set mine locations
+                        mineLocations = data.mineLocations;
+                        
+                        // Update board state with mines
+                        data.mineLocations.forEach(mine => {
+                            if (mine.row < rows && mine.col < cols) {
+                                boardState[mine.row][mine.col].isMine = true;
+                            }
                         });
+                        
+                        // Calculate adjacent mines
+                        for (let r = 0; r < rows; r++) {
+                            for (let c = 0; c < cols; c++) {
+                                if (!boardState[r][c].isMine) {
+                                    boardState[r][c].adjacentMines = countAdjacentMines(r, c);
+                                }
+                            }
+                        }
+                    }
+                    break;
+                    
+                case 'minesweeper_timer_sync':
+                    // Update timer if not room creator
+                    if (!AppState.isRoomCreator) {
+                        timerValue = data.timerValue;
+                        updateTimerDisplay();
+                    }
+                    break;
+                    
+                case 'minesweeper_game_over':
+                    gameOver = true;
+                    
+                    // Stop timer
+                    if (timerInterval) {
+                        clearInterval(timerInterval);
+                        timerInterval = null;
                     }
                     
-                    conn.send({
-                        type: 'minesweeper_board_chunk',
-                        chunkIndex: chunkIndex,
-                        totalChunks: totalChunks,
-                        boardChunk: chunkBoardState
-                    });
-                }
-                
-                // Finally send mine locations
-                conn.send({
-                    type: 'minesweeper_mine_locations',
-                    mineLocations: mineLocations
-                });
-            }, 300);
+                    // Update timer value
+                    timerValue = data.timerValue;
+                    updateTimerDisplay();
+                    
+                    // Update reset button face
+                    if (resetButton) {
+                        resetButton.textContent = data.isWin ? '😎' : '😵';
+                    }
+                    
+                    // Show game over modal
+                    showGameOverModal(data.isWin);
+                    break;
+                    
+                case 'minesweeper_game_state':
+                    if (!AppState.isRoomCreator) {
+                        console.log('[MinesweeperGame] Received game state, preparing for chunks...');
+                        
+                        // Store the game state settings and prepare for board chunks
+                        pendingGameState = data;
+                        receivedBoardChunks = {};
+                        receivedMineLocations = null;
+                        
+                        // Set basic game parameters immediately
+                        rows = data.rows;
+                        cols = data.cols;
+                        mineCount = data.mineCount;
+                        remainingMines = data.remainingMines;
+                        gameStarted = data.gameStarted;
+                        gameOver = data.gameOver;
+                        timerValue = data.timerValue;
+                        
+                        // Update difficulty selector
+                        if (difficultySelect) difficultySelect.value = data.difficulty;
+                        
+                        // Show notification
+                        if (typeof ConnectionManager !== 'undefined' && ConnectionManager.showNotification) {
+                            ConnectionManager.showNotification(
+                                'Syncing Game', 
+                                'Receiving game state...', 
+                                'info'
+                            );
+                        }
+                    }
+                    break;
+                    
+                case 'minesweeper_board_chunk':
+                    if (!AppState.isRoomCreator && pendingGameState) {
+                        // Store this chunk
+                        receivedBoardChunks[data.chunkIndex] = data.boardChunk;
+                        console.log(`[MinesweeperGame] Received chunk ${data.chunkIndex + 1}/${data.totalChunks}`);
+                        
+                        // Check if we have all chunks and the mine locations
+                        if (Object.keys(receivedBoardChunks).length === data.totalChunks && receivedMineLocations) {
+                            assembleAndApplyGameState();
+                        }
+                    }
+                    break;
+                    
+                case 'minesweeper_mine_locations':
+                    if (!AppState.isRoomCreator && pendingGameState) {
+                        receivedMineLocations = data.mineLocations;
+                        console.log('[MinesweeperGame] Received mine locations');
+                        
+                        // Check if we have all board chunks
+                        const receivedChunks = Object.keys(receivedBoardChunks).map(Number);
+                        const expectedTotalChunks = pendingGameState.totalChunks || 0;
+                        
+                        if (receivedChunks.length === expectedTotalChunks) {
+                            assembleAndApplyGameState();
+                        }
+                    }
+                    break;
+                    
+                case 'game_data':
+                    if (data.data && data.data.action) {
+                        switch (data.data.action) {
+                            case 'reset':
+                                // Update difficulty if provided
+                                if (data.data.difficulty && difficultySelect) {
+                                    difficultySelect.value = data.data.difficulty;
+                                    
+                                    // Update board size based on difficulty
+                                    switch (data.data.difficulty) {
+                                        case 'beginner':
+                                            rows = 9;
+                                            cols = 9;
+                                            mineCount = 10;
+                                            break;
+                                        case 'intermediate':
+                                            rows = 16;
+                                            cols = 16;
+                                            mineCount = 40;
+                                            break;
+                                        case 'expert':
+                                            rows = 16;
+                                            cols = 30;
+                                            mineCount = 99;
+                                            break;
+                                    }
+                                }
+                                
+                                // Reset the game
+                                reset();
+                                break;
+                                
+                            case 'difficulty_change':
+                                if (data.data.difficulty && difficultySelect) {
+                                    difficultySelect.value = data.data.difficulty;
+                                    
+                                    // Update board size based on difficulty
+                                    switch (data.data.difficulty) {
+                                        case 'beginner':
+                                            rows = 9;
+                                            cols = 9;
+                                            mineCount = 10;
+                                            break;
+                                        case 'intermediate':
+                                            rows = 16;
+                                            cols = 16;
+                                            mineCount = 40;
+                                            break;
+                                        case 'expert':
+                                            rows = 16;
+                                            cols = 30;
+                                            mineCount = 99;
+                                            break;
+                                    }
+                                    
+                                    // Reset game
+                                    reset();
+                                }
+                                break;
+                        }
+                    }
+                    break;
+                    
+                default:
+                    console.log('[MinesweeperGame] Unhandled message type:', data.type);
+                    break;
+            }
         } catch (error) {
-            console.error('Error sending game state:', error);
+            console.error('[MinesweeperGame] Error handling peer message:', error, data);
         }
     }
     
-    /**
-     * Handle when a player leaves the game
-     */
-    function handlePlayerLeave(playerId) {
-        // This method could be called from app.js when a player disconnects
-        // We could add visual indicators or gameplay adjustments here
-        console.log('Player left the game:', playerId);
-    }
-    
-    // Return public API
+    // Expose public API
     return {
         init,
         reset,
         handlePeerMessage,
-        sendGameState
+        sendGameState,
+        state: {
+            get boardState() { return boardState; },
+            get mineLocations() { return mineLocations; },
+            get revealedCount() { return revealedCount; },
+            get gameStarted() { return gameStarted; },
+            get gameOver() { return gameOver; },
+            get mineCount() { return mineCount; },
+            get remainingMines() { return remainingMines; },
+            get rows() { return rows; },
+            get cols() { return cols; },
+            get timerValue() { return timerValue; }
+        },
+        type: 'minesweeper'
     };
 })();

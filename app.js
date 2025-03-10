@@ -74,9 +74,131 @@ function initApp() {
     checkSavedPlayerName();
     
     // Load the WebRTC adapter for better browser compatibility
-    loadScript('https://webrtc.github.io/adapter/adapter-latest.js');
+    loadScript('https://webrtc.github.io/adapter/adapter-latest.js', function() {
+        console.log('[App] WebRTC adapter loaded');
+        
+        // Set up state synchronization with event-based approach
+        if (typeof ConnectionManager !== 'undefined' && typeof AppState !== 'undefined') {
+            setupStateSyncEvents();
+        } else {
+            console.warn('[App] ConnectionManager or AppState not available yet, will try again later');
+            
+            // Try again after a short delay
+            setTimeout(function() {
+                if (typeof ConnectionManager !== 'undefined' && typeof AppState !== 'undefined') {
+                    setupStateSyncEvents();
+                } else {
+                    console.error('[App] ConnectionManager or AppState still not available');
+                }
+            }, 1000);
+        }
+    });
     
     console.log('[App] Initialization complete');
+}
+
+/**
+ * Sync app and connection manager states
+ * This ensures both components have consistent state
+ * Replaced with event-based approach instead of interval polling
+ */
+function syncStates() {
+    console.log('[App] Syncing states between AppState and ConnectionManager');
+    
+    if (typeof ConnectionManager === 'undefined') {
+        console.warn('[App] ConnectionManager not available for state sync');
+        return;
+    }
+    
+    // Create a deep copy of current states for comparison
+    const prevAppState = JSON.stringify({
+        playerId: AppState.playerId,
+        roomId: AppState.roomId,
+        isRoomCreator: AppState.isRoomCreator,
+        playerCount: Object.keys(AppState.players).length,
+        currentGame: AppState.currentGame
+    });
+    
+    // Update AppState from ConnectionManager
+    AppState.playerId = ConnectionManager.playerId;
+    AppState.roomId = ConnectionManager.roomId;
+    AppState.isRoomCreator = ConnectionManager.isRoomCreator;
+    AppState.players = {...ConnectionManager.players};
+    
+    // Update ConnectionManager from AppState
+    ConnectionManager.playerName = AppState.playerName;
+    
+    // Update game module reference
+    if (AppState.currentGame && AppState.gameModules[AppState.currentGame]) {
+        ConnectionManager.gameModule = AppState.gameModules[AppState.currentGame];
+    }
+    
+    // Check if state has changed
+    const currentAppState = JSON.stringify({
+        playerId: AppState.playerId,
+        roomId: AppState.roomId,
+        isRoomCreator: AppState.isRoomCreator,
+        playerCount: Object.keys(AppState.players).length,
+        currentGame: AppState.currentGame
+    });
+    
+    // Only log if state has changed to reduce console noise
+    if (prevAppState !== currentAppState) {
+        console.log('[App] State sync complete:', {
+            playerId: AppState.playerId,
+            roomId: AppState.roomId,
+            isRoomCreator: AppState.isRoomCreator,
+            playerCount: Object.keys(AppState.players).length,
+            currentGame: AppState.currentGame
+        });
+    }
+}
+
+/**
+ * Set up event-based state synchronization
+ */
+function setupStateSyncEvents() {
+    console.log('[App] Setting up event-based state synchronization');
+    
+    // Sync on room creation/joining
+    const originalCreateRoom = ConnectionManager.createRoom;
+    ConnectionManager.createRoom = function() {
+        const result = originalCreateRoom.apply(this, arguments);
+        syncStates();
+        return result;
+    };
+    
+    const originalJoinRoom = ConnectionManager.joinRoom;
+    ConnectionManager.joinRoom = function() {
+        const result = originalJoinRoom.apply(this, arguments);
+        syncStates();
+        return result;
+    };
+    
+    // Sync on connection events
+    if (ConnectionManager.callbacks) {
+        const originalOnConnected = ConnectionManager.callbacks.onConnected;
+        ConnectionManager.callbacks.onConnected = function() {
+            if (originalOnConnected) originalOnConnected.apply(this, arguments);
+            syncStates();
+        };
+        
+        const originalOnDisconnected = ConnectionManager.callbacks.onDisconnected;
+        ConnectionManager.callbacks.onDisconnected = function() {
+            if (originalOnDisconnected) originalOnDisconnected.apply(this, arguments);
+            syncStates();
+        };
+    }
+    
+    // Add state sync on player name change
+    const originalSavePlayerName = savePlayerName;
+    window.savePlayerName = function(name) {
+        originalSavePlayerName(name);
+        syncStates();
+    };
+    
+    // Initial sync
+    syncStates();
 }
 
 /**
@@ -665,24 +787,8 @@ function handlePlayerNameSubmit() {
             // Sync IDs immediately
             AppState.playerId = ConnectionManager.playerId;
             
-            // Set up sync for roomId and isRoomCreator
-            const syncStates = () => {
-                if (ConnectionManager.roomId) {
-                    AppState.roomId = ConnectionManager.roomId;
-                    AppState.isRoomCreator = ConnectionManager.isRoomCreator;
-                }
-                
-                // Update players from ConnectionManager
-                if (Object.keys(ConnectionManager.players).length > 0) {
-                    AppState.players = {...ConnectionManager.players};
-                }
-            };
-            
-            // Initial sync
+            // Set up sync for roomId and isRoomCreator through event-based sync
             syncStates();
-            
-            // Set up periodic sync to ensure state consistency
-            setInterval(syncStates, 1000);
             
             // Show notification
             ConnectionManager.showNotification('Welcome, ' + name + '!', 'Select a game to start playing.', 'success');
@@ -726,41 +832,6 @@ function showBasicNotification(title, message) {
         notification.style.transition = 'opacity 0.5s';
         setTimeout(() => notification.remove(), 500);
     }, 5000);
-}
-
-/**
- * Sync app and connection manager states
- * This ensures both components have consistent state
- */
-function syncStates() {
-    console.log('[App] Syncing states between AppState and ConnectionManager');
-    
-    if (typeof ConnectionManager === 'undefined') {
-        console.warn('[App] ConnectionManager not available for state sync');
-        return;
-    }
-    
-    // Update AppState from ConnectionManager
-    AppState.playerId = ConnectionManager.playerId;
-    AppState.roomId = ConnectionManager.roomId;
-    AppState.isRoomCreator = ConnectionManager.isRoomCreator;
-    AppState.players = {...ConnectionManager.players};
-    
-    // Update ConnectionManager from AppState
-    ConnectionManager.playerName = AppState.playerName;
-    
-    // Update game module reference
-    if (AppState.currentGame && AppState.gameModules[AppState.currentGame]) {
-        ConnectionManager.gameModule = AppState.gameModules[AppState.currentGame];
-    }
-    
-    console.log('[App] State sync complete:', {
-        playerId: AppState.playerId,
-        roomId: AppState.roomId,
-        isRoomCreator: AppState.isRoomCreator,
-        playerCount: Object.keys(AppState.players).length,
-        currentGame: AppState.currentGame
-    });
 }
 
 // Initialize the app when DOM is loaded
