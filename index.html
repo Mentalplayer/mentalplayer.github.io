@@ -374,59 +374,222 @@
                 if (failedScripts.length > 0) {
                     console.error(`Failed to load scripts: ${failedScripts.join(', ')}`);
                     
-                    // Show error to user for critical scripts
-                    const criticalScripts = ['./webrtc.js', './connection-manager.js'];
-                    const criticalFailed = failedScripts.some(script => criticalScripts.includes(script));
-                    
-                    if (criticalFailed) {
-                        showLoadingError(failedScripts);
-                    }
-                }
-                
-                if (callback) callback(failedScripts.length === 0);
-                return;
+// Add error detection for script loading failures
+window.addEventListener('error', function(event) {
+    if (event.target.tagName === 'SCRIPT') {
+        console.error('Script error detected:', event.target.src);
+        
+        // If critical scripts fail, show error UI
+        if (event.target.src.includes('webrtc.js') || event.target.src.includes('connection-manager.js')) {
+            const errMsg = document.getElementById('css-loading-error');
+            if (errMsg) {
+                const heading = errMsg.querySelector('h2');
+                const message = errMsg.querySelector('p');
+                if (heading) heading.textContent = 'Script Loading Error';
+                if (message) message.textContent = 'Failed to load critical components. Please check console for details.';
+                errMsg.style.display = 'flex';
             }
+        }
+    }
+}, true);
 
-            const script = document.createElement('script');
-            script.src = scripts[currentIndex];
-            
-            // Set timeout for script loading
-            const timeoutId = setTimeout(() => {
-                console.error(`Script loading timed out: ${scripts[currentIndex]}`);
-                script.onload = script.onerror = null; // Remove event handlers
+// Add diagnostics to identify script loading issues
+function addScriptDiagnostics() {
+    // Add to window to make globally available
+    window._diagStartTime = Date.now();
+    window._scriptLoadTimes = {};
+    
+    // Override the appendChild method to track script insertions
+    const originalAppendChild = Node.prototype.appendChild;
+    Node.prototype.appendChild = function(child) {
+        if (child.tagName === 'SCRIPT') {
+            const src = child.src;
+            if (src) {
+                console.log(`Script insertion: ${src}`);
                 
-                // Add to failed scripts and continue
-                failedScripts.push(scripts[currentIndex]);
-                loadScriptsSequentially(scripts, callback, retryCount, currentIndex + 1, failedScripts);
-            }, 10000); // 10 second timeout
+                // Monitor script load events
+                child.addEventListener('load', function() {
+                    const scriptName = src.split('/').pop();
+                    window._scriptLoadTimes[scriptName] = {
+                        loadTime: Date.now() - window._diagStartTime,
+                        success: true
+                    };
+                    console.log(`Script loaded after ${window._scriptLoadTimes[scriptName].loadTime}ms: ${scriptName}`);
+                });
+                
+                child.addEventListener('error', function() {
+                    const scriptName = src.split('/').pop();
+                    window._scriptLoadTimes[scriptName] = {
+                        loadTime: Date.now() - window._diagStartTime,
+                        success: false
+                    };
+                    console.error(`Script failed to load after ${window._scriptLoadTimes[scriptName].loadTime}ms: ${scriptName}`);
+                });
+            }
+        }
+        return originalAppendChild.call(this, child);
+    };
+}
+
+// Initialize diagnostics early
+addScriptDiagnostics();
+// Enhanced script loading function with proper dependency checking and validation
+function loadScriptsSequentially(scripts, callback, retryCount = 3, currentIndex = 0, failedScripts = []) {
+    if (currentIndex >= scripts.length) {
+        if (failedScripts.length > 0) {
+            console.error(`Failed to load scripts: ${failedScripts.join(', ')}`);
+            
+            // Show error to user for critical scripts
+            const criticalScripts = ['./webrtc.js', './connection-manager.js'];
+            const criticalFailed = failedScripts.some(script => criticalScripts.includes(script));
+            
+            if (criticalFailed) {
+                showLoadingError(failedScripts);
+            }
+        }
+        
+        if (callback) callback(failedScripts.length === 0);
+        return;
+    }
+
+    const script = document.createElement('script');
+    script.src = scripts[currentIndex];
+    
+    // Set timeout for script loading
+    const timeoutId = setTimeout(() => {
+        console.error(`Script loading timed out: ${scripts[currentIndex]}`);
+        script.onload = script.onerror = null; // Remove event handlers
+        
+        // Add to failed scripts and continue
+        failedScripts.push(scripts[currentIndex]);
+        loadScriptsSequentially(scripts, callback, retryCount, currentIndex + 1, failedScripts);
+    }, 10000); // 10 second timeout
+    
+    script.onload = function() {
+        console.log(`Loaded script: ${scripts[currentIndex]}`);
+        clearTimeout(timeoutId);
+        
+        // Validate script loaded successfully by checking for expected global objects
+        const scriptName = scripts[currentIndex].split('/').pop();
+        let scriptFailed = false;
+        
+        if (scriptName === 'webrtc.js' && typeof window.SimpleWebRTC === 'undefined') {
+            console.error(`Script ${scriptName} loaded but SimpleWebRTC is undefined`);
+            scriptFailed = true;
+        } else if (scriptName === 'connection-manager.js' && typeof window.ConnectionManager === 'undefined') {
+            console.error(`Script ${scriptName} loaded but ConnectionManager is undefined`);
+            scriptFailed = true;
+        }
+        
+        if (scriptFailed) {
+            failedScripts.push(scripts[currentIndex]);
+            loadScriptsSequentially(scripts, callback, retryCount, currentIndex + 1, failedScripts);
+            return;
+        }
+        
+// Load scripts in sequence with better error handling and fallback mechanisms
+document.addEventListener('DOMContentLoaded', function() {
+    console.log("DOM loaded, starting script loading");
+    
+    // Show loading indicator
+    const cssError = document.getElementById('css-loading-error');
+    if (cssError) {
+        cssError.style.display = 'flex';
+    }
+    
+    // Try direct script loading first - more reliable approach
+    loadDirectScripts();
+    
+    function loadDirectScripts() {
+        console.log("Attempting direct script loading method");
+        let scriptsLoaded = 0;
+        const totalScripts = 6;
+        
+        function checkAllScriptsLoaded() {
+            if (typeof SimpleWebRTC !== 'undefined' && typeof ConnectionManager !== 'undefined') {
+                console.log("Critical scripts loaded successfully!");
+                if (cssError) cssError.style.display = 'none';
+                initializeAfterScriptLoad(true);
+                return true;
+            }
+            return false;
+        }
+        
+        function loadScript(src, callback) {
+            const script = document.createElement('script');
+            script.src = src;
+            script.async = false; // Preserve loading order
             
             script.onload = function() {
-                console.log(`Loaded script: ${scripts[currentIndex]}`);
-                clearTimeout(timeoutId);
-                
-                // Mark as loaded in global tracking
-                if (typeof window !== 'undefined') {
-                    window._scriptsLoaded = window._scriptsLoaded || {};
-                    window._scriptsLoaded[scripts[currentIndex].replace('./', '').replace('.js', '')] = true;
+                console.log(`Directly loaded: ${src}`);
+                scriptsLoaded++;
+                if (callback) callback();
+                if (scriptsLoaded === totalScripts) {
+                    setTimeout(checkAllScriptsLoaded, 500);
                 }
-                
-                // Continue to next script
-                loadScriptsSequentially(scripts, callback, retryCount, currentIndex + 1, failedScripts);
             };
             
             script.onerror = function() {
-                clearTimeout(timeoutId);
-                console.error(`Failed to load script: ${scripts[currentIndex]}`);
-                
-                // Try to retry loading this script
-                if (retryCount > 0) {
-                    console.log(`Retrying script load (${retryCount} attempts left): ${scripts[currentIndex]}`);
-                    loadScriptsSequentially(scripts, callback, retryCount - 1, currentIndex, failedScripts);
-                } else {
-                    // Add to failed scripts and continue
-                    failedScripts.push(scripts[currentIndex]);
-                    loadScriptsSequentially(scripts, callback, retryCount, currentIndex + 1, failedScripts);
+                console.error(`Failed to load: ${src}`);
+                if (callback) callback();
+            };
+            
+            document.head.appendChild(script);
+        }
+        
+        // Load adapter first, then load others in sequence
+        loadScript('https://webrtc.github.io/adapter/adapter-latest.js', function() {
+            loadScript('./webrtc.js', function() {
+                // Check if SimpleWebRTC was defined
+                if (typeof SimpleWebRTC === 'undefined') {
+                    console.error("webrtc.js loaded but SimpleWebRTC is undefined!");
                 }
+                loadScript('./connection-manager.js', function() {
+                    // Check if ConnectionManager was defined
+                    if (typeof ConnectionManager === 'undefined') {
+                        console.error("connection-manager.js loaded but ConnectionManager is undefined!");
+                    }
+                    loadScript('./game-modules.js');
+                    loadScript('./minesweeper.js');
+                    loadScript('./app.js');
+                });
+            });
+        });
+        
+        // Set a timeout to check if direct loading was successful
+        setTimeout(function() {
+            if (!checkAllScriptsLoaded()) {
+                console.warn("Direct loading failed or took too long, falling back to sequential method");
+                // Fall back to the original method as a backup
+                loadScriptsSequentially([
+                    'https://webrtc.github.io/adapter/adapter-latest.js',
+                    './webrtc.js',
+                    './connection-manager.js',
+                    './game-modules.js',
+                    './minesweeper.js',
+                    './app.js'
+                ], function(success) {
+                    console.log("Sequential script loading completed, success:", success);
+                    initializeAfterScriptLoad(success);
+                }, 3);  // Allow up to 3 retries
+            }
+        }, 5000);
+    }
+});
+        
+        // Try to retry loading this script
+        if (retryCount > 0) {
+            console.log(`Retrying script load (${retryCount} attempts left): ${scripts[currentIndex]}`);
+            loadScriptsSequentially(scripts, callback, retryCount - 1, currentIndex, failedScripts);
+        } else {
+            // Add to failed scripts and continue
+            failedScripts.push(scripts[currentIndex]);
+            loadScriptsSequentially(scripts, callback, retryCount, currentIndex + 1, failedScripts);
+        }
+    };
+    
+    document.body.appendChild(script);
+}
             };
             
             document.body.appendChild(script);
@@ -485,6 +648,61 @@
             // Hide CSS loading error if it's showing
             const cssError = document.getElementById('css-loading-error');
             if (cssError) {
+// Add a fallback mechanism if other methods fail
+// This creates a completely separate loading path for the critical scripts
+setTimeout(function() {
+    console.log("Checking if critical components are loaded...");
+    if (typeof SimpleWebRTC === 'undefined' || typeof ConnectionManager === 'undefined') {
+        console.warn("Critical components still missing after timeout, inserting fallback");
+        
+        // Create an emergency script loading div
+        const emergencyDiv = document.createElement('div');
+        emergencyDiv.id = 'emergency-script-loader';
+        emergencyDiv.innerHTML = `
+            <div style="position:fixed; bottom:10px; left:10px; background:#fff3cd; color:#856404; padding:10px; 
+                        border:1px solid #ffeeba; border-radius:4px; z-index:10000; font-size:12px;">
+                Emergency script loading in progress...
+            </div>
+        `;
+        document.body.appendChild(emergencyDiv);
+        
+        // Force load scripts in inline tags to avoid any loading mechanisms
+        const scriptContent = `
+            <script>
+                console.log("Emergency script loader activated");
+                
+                // Create and monitor emergency script tags
+                function loadEmergencyScript(src, callback) {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.setAttribute('data-emergency', 'true');
+                    script.onload = callback;
+                    document.body.appendChild(script);
+                }
+                
+                // Load the critical scripts directly
+                loadEmergencyScript('https://webrtc.github.io/adapter/adapter-latest.js', function() {
+                    loadEmergencyScript('./webrtc.js', function() {
+                        loadEmergencyScript('./connection-manager.js', function() {
+                            console.log("Emergency loading complete");
+                            // Hide the emergency loader
+                            const loader = document.getElementById('emergency-script-loader');
+                            if (loader) loader.style.display = 'none';
+                            // Try to initialize
+                            if (typeof initializeAfterScriptLoad === 'function') {
+                                initializeAfterScriptLoad(true);
+                            }
+                        });
+                    });
+                });
+            </script>
+        `;
+        
+        const scriptContainer = document.createElement('div');
+        scriptContainer.innerHTML = scriptContent;
+        document.body.appendChild(scriptContainer);
+    }
+}, 15000); // Give plenty of time for other methods to work
                 cssError.style.display = 'none';
             }
             

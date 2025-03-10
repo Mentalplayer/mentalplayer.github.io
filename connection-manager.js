@@ -1,4 +1,9 @@
 /**
+// Add immediate logging at the top of the file
+console.log('[connection-manager.js] Script loading started');
+
+// Create a global variable immediately to confirm script is executing
+window._connectionManagerScriptExecuting = true;
  * Connection Manager for Mentalplayer
  * Provides an interface between the app and SimpleWebRTC with improved state management
  */
@@ -1006,6 +1011,13 @@ const ConnectionManager = {
             troubleshootingModal.addEventListener('click', (e) => {
                 if (e.target === troubleshootingModal) {
                     troubleshootingModal.style.display = 'none';
+// Add confirmation at the end of the file
+console.log('[connection-manager.js] Script fully executed, ConnectionManager object created:', !!window.ConnectionManager);
+
+// Verify SimpleWebRTC dependency
+if (typeof SimpleWebRTC === 'undefined') {
+    console.error('[ConnectionManager] SimpleWebRTC dependency not found - this will cause failures');
+}
                 }
             });
         }

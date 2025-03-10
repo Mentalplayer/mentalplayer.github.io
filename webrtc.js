@@ -1,4 +1,9 @@
 /**
+// Add immediate logging at the top of the file
+console.log('[webrtc.js] Script loading started');
+
+// Create a global variable immediately to confirm script is executing
+window._webrtcScriptExecuting = true;
  * SimpleWebRTC - A streamlined WebRTC implementation for Mentalplayer
  * This provides a reliable peer-to-peer connection with manual signaling
  */
