@@ -644,30 +644,36 @@ document.addEventListener('DOMContentLoaded', function() {
          */
         function initializeAfterScriptLoad(success) {
             console.log("Script loading completed, success:", success);
-            
-            // Hide CSS loading error if it's showing
-            const cssError = document.getElementById('css-loading-error');
-            if (cssError) {
-// Add a fallback mechanism if other methods fail
-// This creates a completely separate loading path for the critical scripts
-setTimeout(function() {
-    console.log("Checking if critical components are loaded...");
-    if (typeof SimpleWebRTC === 'undefined' || typeof ConnectionManager === 'undefined') {
-        console.warn("Critical components still missing after timeout, inserting fallback");
+    <!-- Add direct script tags as a guaranteed fallback -->
+    <script>
+        console.log("Adding direct script tags for critical components");
         
-        // Create an emergency script loading div
-        const emergencyDiv = document.createElement('div');
-        emergencyDiv.id = 'emergency-script-loader';
-        emergencyDiv.innerHTML = `
-            <div style="position:fixed; bottom:10px; left:10px; background:#fff3cd; color:#856404; padding:10px; 
-                        border:1px solid #ffeeba; border-radius:4px; z-index:10000; font-size:12px;">
-                Emergency script loading in progress...
-            </div>
-        `;
-        document.body.appendChild(emergencyDiv);
+        // Function to check if components are loaded
+        function checkComponentsLoaded() {
+            console.log("Checking components: SimpleWebRTC =", typeof SimpleWebRTC, "ConnectionManager =", typeof ConnectionManager);
+            return typeof SimpleWebRTC !== 'undefined' && typeof ConnectionManager !== 'undefined';
+        }
         
-        // Force load scripts in inline tags to avoid any loading mechanisms
-        const scriptContent = `
+        // Create script tags with explicit window assignments
+        document.write('<script src="https://webrtc.github.io/adapter/adapter-latest.js"><\/script>');
+        document.write('<script src="./webrtc.js"><\/script>');
+        document.write('<script src="./connection-manager.js"><\/script>');
+        document.write('<script src="./game-modules.js"><\/script>');
+        document.write('<script src="./minesweeper.js"><\/script>');
+        document.write('<script>console.log("Direct script insertion complete");<\/script>');
+        
+        // Add a global error handler
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                if (!checkComponentsLoaded()) {
+                    console.error("Components still not loaded after direct insertion");
+                    alert("Critical components could not be loaded. Please refresh the page or try another browser.");
+                } else {
+                    console.log("All components successfully loaded!");
+                }
+            }, 2000);
+        });
+    </script>
             <script>
                 console.log("Emergency script loader activated");
                 

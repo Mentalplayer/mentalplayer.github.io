@@ -1,4 +1,6 @@
 /**
+// Ensure ConnectionManager is properly exposed to the global scope
+(function(window) {
 // Add immediate logging at the top of the file
 console.log('[connection-manager.js] Script loading started');
 
@@ -1009,6 +1011,10 @@ const ConnectionManager = {
             
             // Close when clicking outside
             troubleshootingModal.addEventListener('click', (e) => {
+// Export ConnectionManager to the global window object
+window.ConnectionManager = ConnectionManager;
+console.log('[connection-manager.js] Explicitly exported ConnectionManager to global scope:', !!window.ConnectionManager);
+})(window);
                 if (e.target === troubleshootingModal) {
                     troubleshootingModal.style.display = 'none';
 // Add confirmation at the end of the file

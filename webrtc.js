@@ -1,4 +1,6 @@
 /**
+// Ensure SimpleWebRTC is properly exposed to the global scope
+(function(window) {
 // Add immediate logging at the top of the file
 console.log('[webrtc.js] Script loading started');
 
