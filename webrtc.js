@@ -27,6 +27,30 @@ const SimpleWebRTC = {
         iceCandidatePoolSize: 10
     },
     
+    browserInfo: (function() {
+        const ua = navigator.userAgent;
+        let browser = "unknown";
+        let version = "0";
+    
+        if (ua.indexOf("Chrome") > -1) {
+            browser = "chrome";
+            version = ua.match(/Chrome\/(\d+)/)[1];
+        } else if (ua.indexOf("Firefox") > -1) {
+            browser = "firefox";
+            version = ua.match(/Firefox\/(\d+)/)[1];
+        } else if (ua.indexOf("Safari") > -1 && ua.indexOf("Chrome") === -1) {
+            browser = "safari";
+            version = ua.match(/Version\/(\d+)/)[1];
+        } else if (ua.indexOf("Edge") > -1 || ua.indexOf("Edg/") > -1) {
+            browser = "edge";
+            version = ua.match(/Edge\/(\d+)/) || ua.match(/Edg\/(\d+)/);
+            version = version ? version[1] : "0";
+        }
+    
+        return { browser, version: parseInt(version) };
+    })(),
+
+
     // Connection state
     state: {
         isInitiator: false,
@@ -81,47 +105,83 @@ const SimpleWebRTC = {
     createConnection: async function() {
         try {
             console.log('Creating connection as initiator...');
-            
-            // Set state
+        
+            // Set statecreateconnection
             this.state.isInitiator = true;
             this.state.isConnecting = true;
             this.updateStatus('connecting', 'Creating connection...');
-            
+        
             // Clean up existing connection if any
             this.cleanupConnection();
-            
-            // Create new RTCPeerConnection
-            this.state.connection = new RTCPeerConnection({
+        
+            // Create new RTCPeerConnection with browser-specific options
+            const rtcConfig = {
                 iceServers: this.config.iceServers,
                 iceCandidatePoolSize: this.config.iceCandidatePoolSize
-            });
-            
+            };
+        
+            // Safari and old Edge-specific compatibility
+            if (this.browserInfo.browser === 'safari' || 
+                (this.browserInfo.browser === 'edge' && this.browserInfo.version < 79)) {
+                // Older Edge and Safari handle RTCPeerConnection differently
+                console.log('Applying Safari/Edge compatibility mode');
+                rtcConfig.bundlePolicy = 'max-bundle';
+                rtcConfig.rtcpMuxPolicy = 'require';
+            }
+        
+            this.state.connection = new RTCPeerConnection(rtcConfig);
+            console.log('Created peer connection as initiator');
+        
             // Set up connection event handlers
             this.setupConnectionHandlers();
-            
-            // Create data channel as initiator
-            this.state.channel = this.state.connection.createDataChannel('gameChannel', {
+        
+            // Create data channel with browser-specific options
+            const channelOptions = {
                 ordered: true
-            });
-            
+            };
+        
+            // Add maxRetransmits for better reliability, different browsers have different defaults
+            if (this.browserInfo.browser === 'chrome' || this.browserInfo.browser === 'edge') {
+                channelOptions.maxRetransmits = 30;
+            } else if (this.browserInfo.browser === 'firefox') {
+                // Firefox has different defaults for reliability
+                channelOptions.maxRetransmits = 30;
+                channelOptions.maxPacketLifeTime = 5000; // 5 seconds
+            }
+        
+            this.state.channel = this.state.connection.createDataChannel('gameChannel', channelOptions);
+        
             // Set up data channel handlers
             this.setupChannelHandlers(this.state.channel);
-            
+        
             // Create offer
-            const offer = await this.state.connection.createOffer();
+            const offerOptions = {};
+        
+            // Safari requires these offer options
+            if (this.browserInfo.browser === 'safari') {
+                offerOptions.offerToReceiveAudio = false;
+                offerOptions.offerToReceiveVideo = false;
+            }
+        
+            const offer = await this.state.connection.createOffer(offerOptions);
             await this.state.connection.setLocalDescription(offer);
-            
+        
             this.state.offerCreated = true;
-            
+        
             // Wait for ICE gathering to complete or timeout
             const offerWithCandidates = await this.waitForIceCandidates();
-            
+        
+            // Start connection monitoring
+            this.startConnectionMonitor();
+        
             // Return the offer with connection details
             return {
                 type: 'offer',
                 initiatorId: this.state.localId,
                 offer: this.state.connection.localDescription,
-                candidates: this.state.localCandidates
+                candidates: this.state.localCandidates,
+                browser: this.browserInfo.browser,
+                version: this.browserInfo.version
             };
         } catch (error) {
             console.error('Error creating connection:', error);
@@ -137,29 +197,40 @@ const SimpleWebRTC = {
     joinConnection: async function(connectionInfo) {
         try {
             console.log('Joining connection as responder...');
-            
+        
             // Set state
             this.state.isInitiator = false;
             this.state.isConnecting = true;
             this.state.peerId = connectionInfo.initiatorId;
             this.updateStatus('connecting', 'Joining connection...');
-            
+        
             // Clean up existing connection if any
             this.cleanupConnection();
-            
-            // Create new RTCPeerConnection
-            this.state.connection = new RTCPeerConnection({
+        
+            // Create new RTCPeerConnection with browser-specific options
+            const rtcConfig = {
                 iceServers: this.config.iceServers,
                 iceCandidatePoolSize: this.config.iceCandidatePoolSize
-            });
-            
+            };
+        
+            // Safari and old Edge-specific compatibility
+            if (this.browserInfo.browser === 'safari' || 
+                (this.browserInfo.browser === 'edge' && this.browserInfo.version < 79)) {
+                console.log('Applying Safari/Edge compatibility mode');
+                rtcConfig.bundlePolicy = 'max-bundle';
+                rtcConfig.rtcpMuxPolicy = 'require';
+            }
+        
+            this.state.connection = new RTCPeerConnection(rtcConfig);
+            console.log('Created peer connection as responder');
+        
             // Set up connection event handlers
             this.setupConnectionHandlers();
-            
+        
             // Set remote description from offer
             const offerDesc = new RTCSessionDescription(connectionInfo.offer);
             await this.state.connection.setRemoteDescription(offerDesc);
-            
+        
             // Add ICE candidates from initiator
             if (connectionInfo.candidates && Array.isArray(connectionInfo.candidates)) {
                 for (const candidate of connectionInfo.candidates) {
@@ -170,20 +241,33 @@ const SimpleWebRTC = {
                     }
                 }
             }
-            
-            // Create answer
-            const answer = await this.state.connection.createAnswer();
+        
+            // Create answer with browser-specific options
+            const answerOptions = {};
+        
+            // Safari requires these answer options
+            if (this.browserInfo.browser === 'safari') {
+                answerOptions.offerToReceiveAudio = false;
+                answerOptions.offerToReceiveVideo = false;
+            }
+        
+            const answer = await this.state.connection.createAnswer(answerOptions);
             await this.state.connection.setLocalDescription(answer);
-            
+        
             // Wait for ICE gathering to complete or timeout
             const answerWithCandidates = await this.waitForIceCandidates();
-            
+        
+            // Start connection monitoring
+            this.startConnectionMonitor();
+        
             // Return the answer with connection details
             return {
                 type: 'answer',
                 responderId: this.state.localId,
                 answer: this.state.connection.localDescription,
-                candidates: this.state.localCandidates
+                candidates: this.state.localCandidates,
+                browser: this.browserInfo.browser,
+                version: this.browserInfo.version
             };
         } catch (error) {
             console.error('Error joining connection:', error);
@@ -312,6 +396,14 @@ const SimpleWebRTC = {
         console.log('Disconnecting...');
         this.cleanupConnection();
         this.updateStatus('disconnected', 'Disconnected');
+    
+        // Make sure all state flags are reset
+        this.state.isInitiator = false;
+        this.state.isConnected = false;
+        this.state.isConnecting = false;
+        this.state.offerCreated = false;
+        this.state.answerReceived = false;
+        this.state.signalConnected = false;
     },
     
     /**
@@ -429,19 +521,25 @@ const SimpleWebRTC = {
         
         channel.onopen = () => {
             console.log('Data channel open:', channel.label);
+    
+            // Make sure we update state flags
             this.state.isConnected = true;
             this.state.isConnecting = false;
-            this.updateStatus('connected', 'Data channel open');
-            
-            // Send an initial ping to confirm connection
-            this.sendData({
-                type: 'ping',
-                timestamp: Date.now()
-            });
-            
-            if (this.callbacks.onConnected) {
-                this.callbacks.onConnected();
-            }
+    
+            // Add a small delay before notifying - helps with race conditions
+            setTimeout(() => {
+                this.updateStatus('connected', 'Data channel open');
+        
+                // Send an initial ping to confirm connection
+                this.sendData({
+                    type: 'ping',
+                    timestamp: Date.now()
+                });
+        
+                if (this.callbacks.onConnected) {
+                    this.callbacks.onConnected();
+                }
+            }, 200);
         };
         
         channel.onclose = () => {
@@ -589,6 +687,41 @@ const SimpleWebRTC = {
         if (this.callbacks.onStatusChange) {
             this.callbacks.onStatusChange(status, message);
         }
+    },
+
+    startConnectionMonitor: function() {
+    // Clear any existing monitor
+        if (this.state.connectionMonitor) {
+            clearInterval(this.state.connectionMonitor);
+        }
+    
+        // Check connection every 2 seconds
+        this.state.connectionMonitor = setInterval(() => {
+            if (this.state.connection) {
+                const state = {
+                    connection: this.state.connection.connectionState,
+                    iceConnection: this.state.connection.iceConnectionState,
+                    dataChannel: this.state.channel ? this.state.channel.readyState : 'none'
+                };
+            
+                console.log('Connection monitor:', state);
+            
+                // If connection is supposed to be open but really isn't, try to recover
+                if (this.state.isConnected && 
+                    (state.connection !== 'connected' || 
+                     state.iceConnection !== 'connected' || 
+                     (this.state.channel && state.dataChannel !== 'open'))) {
+                
+                    console.warn('Connection mismatch detected - attempting recovery');
+                    this.state.isConnected = false;
+                    this.updateStatus('connecting', 'Reconnecting...');
+                    this.handleReconnect();
+                }
+            }
+        }, 2000);
+    
+        // Add this to the end of createConnection method:
+        // this.startConnectionMonitor();
     },
     
     /**

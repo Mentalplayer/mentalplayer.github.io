@@ -40,6 +40,10 @@ const ConnectionManager = {
         // Set player info
         this.playerName = options.playerName || localStorage.getItem('playerName') || 'Player';
         
+        this.roomId = ''; // Reset roomId on initialization
+        this.isRoomCreator = false; // Reset room creator status
+        this.players = {}; // Reset players list
+
         // Update elements references
         this.updateElements();
         
@@ -134,17 +138,22 @@ const ConnectionManager = {
             alert('Please select a game first.');
             return;
         }
-        
-        // Check if already in a room
-        if (this.roomId) {
+    
+        // Better check for already in a room - verify both roomId and connection state
+        if (this.roomId && this.roomId.length > 0 && SimpleWebRTC.state.isConnected) {
             if (!confirm('You are already in a room. Would you like to leave and create a new one?')) {
                 return;
             }
-            
+        
             // Leave current room
             this.leaveRoom();
+        } else if (this.roomId && this.roomId.length > 0) {
+            // We have a roomId but no active connection - just reset it
+            console.log("Resetting stale roomId:", this.roomId);
+            this.roomId = '';
+            this.isRoomCreator = false;
         }
-        
+    
         // Set as room creator
         this.isRoomCreator = true;
         this.roomId = this.playerId;
