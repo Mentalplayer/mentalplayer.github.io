@@ -20,7 +20,8 @@ const ConnectionManager = {
         currentRoomId: document.getElementById('current-room-id'),
         playersContainer: document.getElementById('players-container'),
         myConnectionId: document.getElementById('my-connection-id'),
-        connectionInfoContainer: null
+        connectionInfoContainer: null,
+        answerInfoContainer: null
     },
     
     /**
@@ -230,7 +231,45 @@ const ConnectionManager = {
     processConnectionInfo: async function(connectionInfo) {
         try {
             if (!connectionInfo) {
-                throw new Error('Failed to process answer');
+                throw new Error('Invalid connection information');
+            }
+            
+            // Handle offer (join as responder)
+            if (connectionInfo.type === 'offer' || connectionInfo.offer) {
+                this.isRoomCreator = false;
+                this.roomId = connectionInfo.initiatorId;
+                
+                // Update UI
+                this.updateRoomInfo();
+                
+                // Join the connection
+                this.updateConnectionStatus('connecting', 'Joining room...');
+                const answerInfo = await SimpleWebRTC.joinConnection(connectionInfo);
+                
+                if (answerInfo) {
+                    // Show answer for sharing back to initiator
+                    this.showAnswerInfo(answerInfo);
+                } else {
+                    throw new Error('Failed to create answer');
+                }
+            }
+            // Handle answer (as initiator)
+            else if (connectionInfo.type === 'answer' || connectionInfo.answer) {
+                if (!this.isRoomCreator) {
+                    throw new Error('Cannot process answer: not a room creator');
+                }
+                
+                // Process the answer
+                const result = await SimpleWebRTC.processAnswer(connectionInfo);
+                
+                if (result) {
+                    this.updateConnectionStatus('connecting', 'Finalizing connection...');
+                    // Hide connection info container
+                    if (this.elements.connectionInfoContainer) {
+                        this.elements.connectionInfoContainer.style.display = 'none';
+                    }
+                } else {
+                    throw new Error('Failed to process answer');
                 }
             } else {
                 throw new Error('Unknown connection information type');
@@ -1165,42 +1204,4 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-});Invalid connection information');
-            }
-            
-            // Handle offer (join as responder)
-            if (connectionInfo.type === 'offer' || connectionInfo.offer) {
-                this.isRoomCreator = false;
-                this.roomId = connectionInfo.initiatorId;
-                
-                // Update UI
-                this.updateRoomInfo();
-                
-                // Join the connection
-                this.updateConnectionStatus('connecting', 'Joining room...');
-                const answerInfo = await SimpleWebRTC.joinConnection(connectionInfo);
-                
-                if (answerInfo) {
-                    // Show answer for sharing back to initiator
-                    this.showAnswerInfo(answerInfo);
-                } else {
-                    throw new Error('Failed to create answer');
-                }
-            }
-            // Handle answer (as initiator)
-            else if (connectionInfo.type === 'answer' || connectionInfo.answer) {
-                if (!this.isRoomCreator) {
-                    throw new Error('Cannot process answer: not a room creator');
-                }
-                
-                // Process the answer
-                const result = await SimpleWebRTC.processAnswer(connectionInfo);
-                
-                if (result) {
-                    this.updateConnectionStatus('connecting', 'Finalizing connection...');
-                    // Hide connection info container
-                    if (this.elements.connectionInfoContainer) {
-                        this.elements.connectionInfoContainer.style.display = 'none';
-                    }
-                } else {
-                    throw new Error('
+});
