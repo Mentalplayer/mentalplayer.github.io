@@ -1,658 +1,283 @@
 /**
-// Ensure ConnectionManager is properly exposed to the global scope
-(function(window) {
-// Add immediate logging at the top of the file
-console.log('[connection-manager.js] Script loading started');
-
-// Create a global variable immediately to confirm script is executing
-window._connectionManagerScriptExecuting = true;
- * Connection Manager for Mentalplayer
- * Provides an interface between the app and SimpleWebRTC with improved state management
+ * Simplified Connection Manager for Mentalplayer
+ * Uses PeerJS for WebRTC signaling and connection management
  */
 
-const ConnectionManager = {
-    // State
-    playerName: '',
-    playerId: '',
-    isRoomCreator: false,
-    roomId: '',
-    players: {},
-    gameModule: null,
-    
-    // UI Elements
-    elements: {
-        connectionStatus: document.getElementById('connection-status'),
-        playerDisplay: document.getElementById('player-display'),
-        roomInfo: document.getElementById('room-info'),
-        currentRoomId: document.getElementById('current-room-id'),
-        playersContainer: document.getElementById('players-container'),
-        myConnectionId: document.getElementById('my-connection-id'),
-        connectionInfoContainer: null,
-        answerInfoContainer: null
-    },
-    
+class ConnectionManager {
+    constructor() {
+        // Configuration
+        this.config = {
+            debug: 2, // Log level (0: errors, 1: warnings, 2: all)
+            heartbeatInterval: 5000, // ms between connection checks
+        };
+
+        // State
+        this.state = {
+            initialized: false,
+            connected: false,
+            connecting: false,
+            roomId: '',
+            isRoomCreator: false,
+            peer: null,
+            connection: null,
+            playerId: '',
+            playerName: '',
+            players: {},
+            gameModule: null
+        };
+
+        // DOM element references 
+        this.elements = {
+            connectionStatus: document.getElementById('connection-status'),
+            roomInfo: document.getElementById('room-info'),
+            currentRoomId: document.getElementById('current-room-id'),
+            playersContainer: document.getElementById('players-container')
+        };
+
+        // Heartbeat timer
+        this.heartbeatTimer = null;
+
+        // Bind methods to preserve 'this' context
+        this.init = this.init.bind(this);
+        this.createRoom = this.createRoom.bind(this);
+        this.joinRoom = this.joinRoom.bind(this);
+        this.leaveRoom = this.leaveRoom.bind(this);
+        this.sendData = this.sendData.bind(this);
+        this._setupConnectionListeners = this._setupConnectionListeners.bind(this);
+        this._handleConnectionOpen = this._handleConnectionOpen.bind(this);
+        this._handleConnectionClose = this._handleConnectionClose.bind(this);
+        this._handleConnectionError = this._handleConnectionError.bind(this);
+        this._handleConnectionData = this._handleConnectionData.bind(this);
+    }
+
     /**
-     * Initialize the connection manager with improved logging
+     * Initialize the connection manager
      * @param {Object} options Configuration options
      * @returns {string} Player ID
      */
-    init: function(options = {}) {
-        console.log('[ConnectionManager] Initializing with options:', options);
-        
-        // Make sure SimpleWebRTC is available
-        if (typeof SimpleWebRTC === 'undefined') {
-            console.error('[ConnectionManager] SimpleWebRTC not found. Please make sure webrtc.js is loaded');
-            this.showNotification('Connection Error', 'WebRTC system not available. Please refresh the page.', 'error');
-            return null;
-        }
-        
-        // Set player info
-        this.playerName = options.playerName || localStorage.getItem('playerName') || 'Player';
-        console.log('[ConnectionManager] Player name:', this.playerName);
-        
-        this.roomId = ''; // Reset roomId on initialization
-        this.isRoomCreator = false; // Reset room creator status
-        this.players = {}; // Reset players list
+    init(options = {}) {
+        this.log('Initializing Connection Manager');
 
-        // Update elements references
-        this.updateElements();
-        
-        // Initialize WebRTC with callbacks
-        this.playerId = SimpleWebRTC.init({
-            callbacks: {
-                onConnected: () => this.handleConnected(),
-                onDisconnected: () => this.handleDisconnected(),
-                onMessage: (message) => this.handleMessage(message),
-                onError: (message, error) => this.handleError(message, error),
-                onStatusChange: (status, message) => this.updateConnectionStatus(status, message),
-                onNewIceCandidate: (candidate) => this.handleNewIceCandidate(candidate),
-                onReconnectAttempt: (peerId) => this.handleReconnectAttempt(peerId)
-            }
-        });
-        
-        console.log('[ConnectionManager] Initialized with ID:', this.playerId);
-        
-        // Update player display
-        if (this.elements.playerDisplay) {
-            this.elements.playerDisplay.textContent = this.playerName;
+        // Load options
+        if (options.playerName) {
+            this.state.playerName = options.playerName;
+        } else if (localStorage.getItem('playerName')) {
+            this.state.playerName = localStorage.getItem('playerName');
+        } else {
+            this.state.playerName = 'Player';
         }
-        
-        // Update connection ID display
-        if (this.elements.myConnectionId) {
-            this.elements.myConnectionId.textContent = this.playerId;
+
+        // Load PeerJS library if not already loaded
+        if (typeof Peer === 'undefined') {
+            this.log('PeerJS not loaded, loading now...', 1);
+            this._loadPeerJS()
+                .then(() => this._initializePeer())
+                .catch(err => {
+                    this.showNotification('Error', 'Failed to load connection library. Please refresh the page.', 'error');
+                    this.log('Failed to load PeerJS: ' + err, 0);
+                });
+        } else {
+            this._initializePeer();
         }
-        
-        // Set up event listeners
-        this.setupEventListeners();
-        
-        // Add self to players list
-        this.players[this.playerId] = {
-            name: this.playerName,
-            id: this.playerId,
-            color: this.getRandomColor()
-        };
-        
-        // Sync with AppState if available
-        if (typeof AppState !== 'undefined') {
-            this.syncWithAppState();
-        }
-        
-        // Show welcome notification
-        this.showNotification('Connection Ready', 'You can now create or join a room', 'info');
-        
-        return this.playerId;
-    },
-    
+
+        return this.state.playerId;
+    }
+
     /**
-     * Synchronize state with AppState
+     * Create a new room as room creator
      */
-    syncWithAppState: function() {
-        console.log('[ConnectionManager] Synchronizing with AppState');
-        
-        if (typeof AppState === 'undefined') {
-            console.warn('[ConnectionManager] AppState not available for synchronization');
+    createRoom() {
+        if (!this.state.initialized) {
+            this.showNotification('Not Ready', 'Connection system is still initializing, please try again in a moment.', 'warning');
             return;
         }
-        
-        // Update AppState with our values
-        AppState.playerName = this.playerName;
-        AppState.playerId = this.playerId;
-        AppState.roomId = this.roomId;
-        AppState.isRoomCreator = this.isRoomCreator;
-        AppState.players = this.players;
-        
-        // Set game module if AppState has a current game
-        if (AppState.currentGame && typeof AppState.gameModules !== 'undefined' && AppState.gameModules[AppState.currentGame]) {
-            this.gameModule = AppState.gameModules[AppState.currentGame];
-        }
-        
-        console.log('[ConnectionManager] State synchronized with AppState:', {
-            playerName: AppState.playerName,
-            playerId: AppState.playerId,
-            roomId: AppState.roomId,
-            isRoomCreator: AppState.isRoomCreator,
-            currentGame: AppState.currentGame
-        });
-    },
-    
-    /**
-     * Update UI element references to ensure we have the latest
-     */
-    updateElements: function() {
-        console.log('[ConnectionManager] Updating UI element references');
-        
-        this.elements.connectionStatus = document.getElementById('connection-status') || this.elements.connectionStatus;
-        this.elements.playerDisplay = document.getElementById('player-display') || this.elements.playerDisplay;
-        this.elements.roomInfo = document.getElementById('room-info') || this.elements.roomInfo;
-        this.elements.currentRoomId = document.getElementById('current-room-id') || this.elements.currentRoomId;
-        this.elements.playersContainer = document.getElementById('players-container') || this.elements.playersContainer;
-        this.elements.myConnectionId = document.getElementById('my-connection-id') || this.elements.myConnectionId;
-    },
-    
-    /**
-     * Set up event listeners for connection-related elements
-     */
-    setupEventListeners: function() {
-        console.log('[ConnectionManager] Setting up event listeners');
-        
-        // Create room button
-        const createRoomButton = document.getElementById('create-room');
-        if (createRoomButton) {
-            createRoomButton.addEventListener('click', () => this.createRoom());
-        }
-        
-        // Join room button
-        const joinRoomButton = document.getElementById('join-room');
-        if (joinRoomButton) {
-            joinRoomButton.addEventListener('click', () => {
-                const roomIdInput = document.getElementById('room-id');
-                const roomId = roomIdInput ? roomIdInput.value.trim() : '';
-                if (roomId) {
-                    this.joinRoom(roomId);
-                } else {
-                    this.showManualConnectionInput();
-                }
-            });
-        }
-        
-        // Add diagnostic button to troubleshooting
-        const webrtcInfo = document.querySelector('.webrtc-info');
-        if (webrtcInfo) {
-            const diagnosticButton = document.createElement('button');
-            diagnosticButton.id = 'diagnostic-button';
-            diagnosticButton.className = 'button secondary-button';
-            diagnosticButton.innerHTML = '<i class="fas fa-stethoscope"></i> Connection Diagnostics';
-            diagnosticButton.addEventListener('click', () => this.showDiagnostics());
-            
-            webrtcInfo.appendChild(diagnosticButton);
-        }
-    },
-    
-    /**
-     * Create a new room as initiator with improved handling
-     */
-    createRoom: async function() {
-        console.log('[ConnectionManager] Creating room...');
-        
-        // Check if game is selected
-        if (!this.gameModule && typeof AppState !== 'undefined' && !AppState.currentGame) {
-            alert('Please select a game first.');
-            return;
-        }
-    
-        // Better check for already in a room - verify both roomId and connection state
-        if (this.roomId && this.roomId.length > 0 && SimpleWebRTC.state.isConnected) {
-            if (!confirm('You are already in a room. Would you like to leave and create a new one?')) {
-                return;
-            }
-        
-            // Leave current room
+
+        if (this.state.connected) {
             this.leaveRoom();
-        } else if (this.roomId && this.roomId.length > 0) {
-            // We have a roomId but no active connection - just reset it
-            console.log("[ConnectionManager] Resetting stale roomId:", this.roomId);
-            this.roomId = '';
-            this.isRoomCreator = false;
         }
-    
-        // Set as room creator
-        this.isRoomCreator = true;
-        this.roomId = this.playerId;
+
+        this.state.isRoomCreator = true;
+        this.state.roomId = this.state.playerId;
         
-        // Sync with AppState
-        if (typeof AppState !== 'undefined') {
-            AppState.roomId = this.roomId;
-            AppState.isRoomCreator = this.isRoomCreator;
-            console.log('[ConnectionManager] Synced room state with AppState:', {
-                roomId: AppState.roomId,
-                isRoomCreator: AppState.isRoomCreator
-            });
-        }
-        
-        // Update UI
+        this.updateStatus('connected', 'Room created');
         this.updateRoomInfo();
         
+        // Update players list with local player
+        this.state.players[this.state.playerId] = {
+            id: this.state.playerId,
+            name: this.state.playerName,
+            color: this._getRandomColor(),
+            isCreator: true
+        };
+        
+        this.updatePlayersList();
+        this.showNotification('Room Created', `Room ${this.state.roomId} created. Share the Room ID to invite others.`, 'success');
+        
+        // Start heartbeat
+        this._startHeartbeat();
+    }
+
+    /**
+     * Join an existing room with the given ID
+     * @param {string} roomId Room ID to join
+     */
+    joinRoom(roomId) {
+        if (!this.state.initialized) {
+            this.showNotification('Not Ready', 'Connection system is still initializing, please try again in a moment.', 'warning');
+            return;
+        }
+
+        if (!roomId) {
+            this.showNotification('Error', 'Please enter a Room ID to join.', 'error');
+            return;
+        }
+
+        if (roomId === this.state.playerId) {
+            this.showNotification('Error', 'You cannot join your own room.', 'error');
+            return;
+        }
+
+        if (this.state.connected) {
+            this.leaveRoom();
+        }
+
+        this.log(`Joining room: ${roomId}`);
+        this.state.roomId = roomId;
+        this.state.isRoomCreator = false;
+        this.state.connecting = true;
+        
+        this.updateStatus('connecting', 'Connecting to room...');
+
         try {
-            // Create WebRTC connection
-            this.updateConnectionStatus('connecting', 'Creating room...');
-            const connectionInfo = await SimpleWebRTC.createConnection();
-            
-            if (connectionInfo) {
-                // Show connection info for manual sharing
-                this.showConnectionInfo(connectionInfo);
-                
-                // System message
-                this.addChatMessage('system', 'Room created. Share the connection info with a friend to play together.');
-            } else {
-                this.updateConnectionStatus('error', 'Failed to create room');
-                this.showNotification('Connection Error', 'Failed to create room. Please try again.', 'error');
+            // Connect to the peer (room creator)
+            const conn = this.state.peer.connect(roomId, {
+                reliable: true,
+                serialization: 'json'
+            });
+
+            if (!conn) {
+                throw new Error('Failed to create connection');
             }
+
+            this.state.connection = conn;
+            this._setupConnectionListeners(conn);
+
+            // Update players list with local player
+            this.state.players[this.state.playerId] = {
+                id: this.state.playerId,
+                name: this.state.playerName,
+                color: this._getRandomColor(),
+                isCreator: false
+            };
+
+            this.updateRoomInfo();
         } catch (error) {
-            console.error('[ConnectionManager] Error creating room:', error);
-            this.updateConnectionStatus('error', 'Failed to create room');
-            this.showNotification('Connection Error', 'Error creating room: ' + error.message, 'error');
+            this.log('Error joining room: ' + error, 0);
+            this.state.connecting = false;
+            this.updateStatus('error', 'Failed to join room');
+            this.showNotification('Connection Error', 'Failed to join room. Please check the Room ID and try again.', 'error');
         }
-    },
-    
+    }
+
     /**
-     * Join an existing room as responder with improved handling
-     * @param {string} roomIdOrInfo Room ID or connection info
+     * Leave the current room
      */
-    joinRoom: async function(roomIdOrInfo) {
-        console.log('[ConnectionManager] Joining room with info:', roomIdOrInfo);
-        
-        try {
-            if (!roomIdOrInfo) {
-                alert('Please enter a Room ID or connection info.');
-                return;
-            }
-            
-            // Check if trying to join own room
-            if (roomIdOrInfo === this.playerId) {
-                alert('You cannot join your own room this way.');
-                return;
-            }
-            
-            // Check if already in a room
-            if (this.roomId) {
-                if (!confirm('You are already in a room. Would you like to leave and join a new one?')) {
-                    return;
-                }
-                
-                // Leave current room
-                this.leaveRoom();
-            }
-            
-            // Try to parse as connection info
-            let connectionInfo;
-            try {
-                if (roomIdOrInfo.length > 20 && (roomIdOrInfo.includes('{') || roomIdOrInfo.startsWith('{'))) {
-                    connectionInfo = JSON.parse(roomIdOrInfo);
-                    console.log('[ConnectionManager] Parsed connection info:', {
-                        type: connectionInfo.type,
-                        initiatorId: connectionInfo.initiatorId,
-                        hasCandidates: !!connectionInfo.candidates
-                    });
-                }
-            } catch (e) {
-                console.log('[ConnectionManager] Not valid JSON, treating as room ID:', e);
-            }
-            
-            if (connectionInfo && (connectionInfo.type === 'offer' || connectionInfo.offer)) {
-                // Process as a connection info object
-                this.processConnectionInfo(connectionInfo);
-            } else {
-                // Treat as a room ID and show manual connection UI
-                this.showManualConnectionInput(roomIdOrInfo);
-            }
-        } catch (error) {
-            console.error('[ConnectionManager] Error joining room:', error);
-            this.showNotification('Connection Error', 'Error joining room: ' + error.message, 'error');
+    leaveRoom() {
+        if (this.state.connection) {
+            this.state.connection.close();
+            this.state.connection = null;
         }
-    },
-    
-    /**
-     * Handle reconnection attempts from SimpleWebRTC
-     * @param {string} peerId Peer ID to reconnect to
-     */
-    handleReconnectAttempt: function(peerId) {
-        console.log('[ConnectionManager] Attempting to reconnect to peer:', peerId);
-        this.showNotification('Connection Issue', 'Attempting to reconnect...', 'warning');
-        
-        // If we're the responder, we need to try re-joining the room
-        if (!this.isRoomCreator && this.roomId) {
-            // Wait a moment and try to rejoin
-            setTimeout(() => {
-                const roomIdInput = document.getElementById('room-id');
-                if (roomIdInput) {
-                    roomIdInput.value = this.roomId;
-                }
-                this.showManualConnectionInput(this.roomId);
-            }, 2000);
+
+        // Close any connections to us if we're the host
+        if (this.state.isRoomCreator && this.state.peer) {
+            this.state.peer.disconnect();
+            // Reconnect for future use
+            this.state.peer.reconnect();
         }
-    },
-    
-    /**
-     * Process connection info (offer or answer) with improved handling
-     * @param {Object} connectionInfo Connection information
-     */
-    processConnectionInfo: async function(connectionInfo) {
-        console.log('[ConnectionManager] Processing connection info:', {
-            type: connectionInfo.type,
-            hasOffer: !!connectionInfo.offer,
-            hasAnswer: !!connectionInfo.answer
-        });
-        
-        try {
-            if (!connectionInfo) {
-                throw new Error('Invalid connection information');
-            }
-            
-            // Handle offer (join as responder)
-            if (connectionInfo.type === 'offer' || connectionInfo.offer) {
-                this.isRoomCreator = false;
-                this.roomId = connectionInfo.initiatorId;
-                
-                // Sync with AppState
-                if (typeof AppState !== 'undefined') {
-                    AppState.roomId = this.roomId;
-                    AppState.isRoomCreator = this.isRoomCreator;
-                }
-                
-                // Update UI
-                this.updateRoomInfo();
-                
-                // Join the connection
-                this.updateConnectionStatus('connecting', 'Joining room...');
-                const answerInfo = await SimpleWebRTC.joinConnection(connectionInfo);
-                
-                if (answerInfo) {
-                    // Show answer for sharing back to initiator
-                    this.showAnswerInfo(answerInfo);
-                } else {
-                    throw new Error('Failed to create answer');
-                }
-            }
-            // Handle answer (as initiator)
-            else if (connectionInfo.type === 'answer' || connectionInfo.answer) {
-                if (!this.isRoomCreator) {
-                    throw new Error('Cannot process answer: not a room creator');
-                }
-                
-                // Process the answer
-                const result = await SimpleWebRTC.processAnswer(connectionInfo);
-                
-                if (result) {
-                    this.updateConnectionStatus('connecting', 'Finalizing connection...');
-                    // Hide connection info container
-                    if (this.elements.connectionInfoContainer) {
-                        this.elements.connectionInfoContainer.style.display = 'none';
-                    }
-                } else {
-                    throw new Error('Failed to process answer');
-                }
-            } else {
-                throw new Error('Unknown connection information type');
-            }
-        } catch (error) {
-            console.error('[ConnectionManager] Error processing connection info:', error);
-            this.updateConnectionStatus('error', error.message);
-            this.showNotification('Connection Error', error.message, 'error');
+
+        // Stop heartbeat
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
         }
-    },
-    
-    /**
-     * Handle new ICE candidate from the local peer
-     * @param {RTCIceCandidate} candidate ICE candidate
-     */
-    handleNewIceCandidate: function(candidate) {
-        console.log('[ConnectionManager] New ICE candidate to be sent');
-    },
-    
-    /**
-     * Leave the current room with improved handling
-     */
-    leaveRoom: function() {
-        console.log('[ConnectionManager] Leaving room:', this.roomId);
-        
-        // Disconnect WebRTC
-        SimpleWebRTC.disconnect();
-        
+
         // Reset state
-        this.isRoomCreator = false;
-        this.roomId = '';
+        this.state.connected = false;
+        this.state.connecting = false;
+        this.state.isRoomCreator = false;
+        this.state.roomId = '';
         
         // Keep only self in players list
-        const currentPlayerData = this.players[this.playerId];
-        this.players = {};
-        if (currentPlayerData) {
-            this.players[this.playerId] = currentPlayerData;
+        const selfPlayer = this.state.players[this.state.playerId];
+        this.state.players = {};
+        if (selfPlayer) {
+            this.state.players[this.state.playerId] = selfPlayer;
         }
         
-        // Sync with AppState
-        if (typeof AppState !== 'undefined') {
-            AppState.roomId = '';
-            AppState.isRoomCreator = false;
-            AppState.players = { ...this.players };
-        }
-        
-        // Update UI
-        if (this.elements.roomInfo) {
-            this.elements.roomInfo.style.display = 'none';
-        }
-        
-        // Close any connection info modals
-        this.hideConnectionInfo();
-        
-        // Update UI
+        this.updateStatus('disconnected', 'Left room');
+        this.updateRoomInfo();
         this.updatePlayersList();
-        this.updateConnectionStatus('disconnected', 'Left room');
         
-        // System message
-        this.addChatMessage('system', 'Disconnected from room.');
-    },
-    
+        this.showNotification('Disconnected', 'You have left the room.', 'info');
+    }
+
     /**
-     * Send data to the connected peer with improved handling
+     * Send data to the connected peer(s)
      * @param {Object} data Data to send
      * @returns {boolean} Success status
      */
-    sendData: function(data) {
-        // Don't log ping/pong messages to avoid console noise
-        if (data.type !== 'ping' && data.type !== 'pong') {
-            console.log('[ConnectionManager] Sending data:', data);
-        }
-        
-        return SimpleWebRTC.sendData(data);
-    },
-    
-    /**
-     * Handle successful connection with improved handling
-     */
-    handleConnected: function() {
-        console.log('[ConnectionManager] Successfully connected!');
-        
-        // Hide connection info dialogs
-        this.hideConnectionInfo();
-        
-        // Make sure self is in players list
-        if (!this.players[this.playerId]) {
-            this.players[this.playerId] = {
-                name: this.playerName,
-                id: this.playerId,
-                color: this.getRandomColor()
-            };
-        }
-        
-        // Sync with AppState
-        if (typeof AppState !== 'undefined') {
-            AppState.players = { ...this.players };
-        }
-        
-        // Send player info
-        this.sendData({
-            type: 'player_info',
-            name: this.playerName,
-            id: this.playerId,
-            color: this.players[this.playerId].color,
-            gameType: this.gameModule ? this.gameModule.type : 
-                (typeof AppState !== 'undefined' ? AppState.currentGame : null)
-        });
-        
-        // Update players list
-        this.updatePlayersList();
-        
-        // Show success notification
-        this.showNotification('Connected!', 'Connection established successfully.', 'success');
-        
-        // Add system message
-        this.addChatMessage('system', 'Connection established!');
-        
-        // Send game state if we're the room creator and have a game module
-        if (this.isRoomCreator && this.gameModule && this.gameModule.sendGameState) {
-            setTimeout(() => {
-                console.log('[ConnectionManager] Sending game state to peer');
-                this.gameModule.sendGameState(SimpleWebRTC);
-            }, 1000);
-        }
-    },
-    
-    /**
-     * Handle disconnection with improved handling
-     */
-    handleDisconnected: function() {
-        console.log('[ConnectionManager] Disconnected from peer');
-        
-        // Find the other player
-        const otherPlayerId = Object.keys(this.players).find(id => id !== this.playerId);
-        if (otherPlayerId) {
-            const playerName = this.players[otherPlayerId].name;
-            delete this.players[otherPlayerId];
-            
-            // Sync with AppState
-            if (typeof AppState !== 'undefined') {
-                AppState.players = { ...this.players };
-            }
-            
-            // Update UI
-            this.updatePlayersList();
-            
-            // Show notification
-            this.showNotification('Disconnected', `${playerName} has disconnected.`, 'warning');
-            
-            // Add system message
-            this.addChatMessage('system', `${playerName} has disconnected.`);
-        }
-    },
-    
-    /**
-     * Handle incoming messages with improved handling
-     * @param {Object} message Message data
-     */
-    handleMessage: function(message) {
+    sendData(data) {
+        if (!data) return false;
+
         try {
-            // Don't log ping/pong messages to avoid console noise
-            if (message.type !== 'ping' && message.type !== 'pong') {
-                console.log('[ConnectionManager] Received message:', message);
-            }
-            
-            if (!message || !message.type) return;
-            
-            switch (message.type) {
-                case 'player_info':
-                    // Add player to list
-                    this.players[message.id] = {
-                        name: message.name,
-                        id: message.id,
-                        color: message.color || this.getRandomColor(),
-                        gameType: message.gameType
-                    };
+            // Room creator sends to all connections
+            if (this.state.isRoomCreator) {
+                // If we're using PeerJS and have active connections
+                if (this.state.peer && this.state.peer.connections) {
+                    let sentCount = 0;
                     
-                    // Sync with AppState
-                    if (typeof AppState !== 'undefined') {
-                        AppState.players = { ...this.players };
-                    }
-                    
-                    // Update players list
-                    this.updatePlayersList();
-                    
-                    // Show notification
-                    this.showNotification('Player Joined', `${message.name} has joined the game.`, 'info');
-                    
-                    // Add system message
-                    this.addChatMessage('system', `${message.name} has joined the room.`);
-                    
-                    // If we're the room creator and they specified a game type, switch to it
-                    if (this.isRoomCreator && message.gameType && 
-                        this.gameModule && this.gameModule.type !== message.gameType &&
-                        typeof selectGame === 'function') {
-                        selectGame(message.gameType, false);
-                    }
-                    break;
-                    
-                case 'chat_message':
-                    this.addChatMessage(message.senderId, message.message || message.text);
-                    break;
-                    
-                case 'ping':
-                    // Auto-respond to pings for connection testing
-                    this.sendData({
-                        type: 'pong',
-                        timestamp: message.timestamp
+                    // Iterate over all connections
+                    Object.keys(this.state.peer.connections).forEach(peerId => {
+                        const connections = this.state.peer.connections[peerId];
+                        connections.forEach(conn => {
+                            if (conn.open) {
+                                conn.send({
+                                    ...data,
+                                    senderId: this.state.playerId
+                                });
+                                sentCount++;
+                            }
+                        });
                     });
-                    break;
                     
-                case 'pong':
-                    // Calculate ping time if monitoring
-                    if (typeof pingMonitor !== 'undefined' && message.timestamp) {
-                        pingMonitor.receivePong(message.senderId, message.timestamp);
-                    }
-                    break;
-                    
-                default:
-                    // Pass to game module or app for handling
-                    if (this.gameModule && this.gameModule.handlePeerMessage) {
-                        this.gameModule.handlePeerMessage(message.senderId, message);
-                    } else if (typeof handlePeerMessage === 'function') {
-                        handlePeerMessage(message.senderId, message);
-                    } else if (typeof AppState !== 'undefined' && 
-                               AppState.gameModules && 
-                               AppState.currentGame && 
-                               AppState.gameModules[AppState.currentGame] &&
-                               AppState.gameModules[AppState.currentGame].handlePeerMessage) {
-                        AppState.gameModules[AppState.currentGame].handlePeerMessage(message.senderId, message);
-                    } else {
-                        console.log('[ConnectionManager] Unhandled message type:', message.type);
-                    }
-                    break;
+                    return sentCount > 0;
+                }
+                
+                return false;
+            } 
+            // Non-creator sends only to the room creator
+            else if (this.state.connection && this.state.connection.open) {
+                this.state.connection.send({
+                    ...data,
+                    senderId: this.state.playerId
+                });
+                return true;
             }
+            
+            return false;
         } catch (error) {
-            console.error('[ConnectionManager] Error handling message:', error);
+            this.log('Error sending data: ' + error, 0);
+            return false;
         }
-    },
-    
+    }
+
     /**
-     * Handle errors with improved handling
-     * @param {string} message Error message
-     * @param {Error} error Error object
-     */
-    handleError: function(message, error) {
-        console.error('[ConnectionManager] Connection error:', message, error);
-        
-        // Show notification
-        this.showNotification('Connection Error', message, 'error');
-        
-        // Add system message
-        this.addChatMessage('system', `Connection error: ${message}`);
-    },
-    
-    /**
-     * Update connection status display with improved handling
+     * Update the connection status display
      * @param {string} status Status code
      * @param {string} message Status message
      */
-    updateConnectionStatus: function(status, message) {
-        console.log(`[ConnectionManager] Connection status: ${status} - ${message}`);
+    updateStatus(status, message) {
+        this.log(`Status: ${status} - ${message}`);
         
         if (!this.elements.connectionStatus) return;
         
@@ -666,52 +291,35 @@ const ConnectionManager = {
         }
         
         this.elements.connectionStatus.innerHTML = displayText;
-        
-        // Add troubleshooting button if disconnected or error
-        if (status === 'disconnected' || status === 'error') {
-            const troubleshootButton = document.createElement('button');
-            troubleshootButton.className = 'troubleshoot-button';
-            troubleshootButton.innerHTML = '<i class="fas fa-question-circle"></i>';
-            troubleshootButton.title = 'Connection help';
-            troubleshootButton.addEventListener('click', () => this.showTroubleshooting());
-            
-            this.elements.connectionStatus.appendChild(troubleshootButton);
-        }
-    },
-    
+    }
+
     /**
      * Update room info display
      */
-    updateRoomInfo: function() {
-        console.log('[ConnectionManager] Updating room info:', this.roomId);
-        
+    updateRoomInfo() {
         if (!this.elements.roomInfo || !this.elements.currentRoomId) return;
         
-        this.elements.roomInfo.style.display = 'block';
-        this.elements.currentRoomId.textContent = this.roomId;
-        
-        // Show side panel
-        const sidePanel = document.getElementById('side-panel');
-        if (sidePanel) {
-            sidePanel.style.display = 'flex';
+        if (this.state.roomId) {
+            this.elements.roomInfo.style.display = 'block';
+            this.elements.currentRoomId.textContent = this.state.roomId;
+        } else {
+            this.elements.roomInfo.style.display = 'none';
         }
-    },
-    
+    }
+
     /**
      * Update players list display
      */
-    updatePlayersList: function() {
-        console.log('[ConnectionManager] Updating players list:', Object.keys(this.players));
-        
+    updatePlayersList() {
         if (!this.elements.playersContainer) return;
         
         this.elements.playersContainer.innerHTML = '';
         
-        Object.values(this.players).forEach(player => {
+        Object.values(this.state.players).forEach(player => {
             const playerElement = document.createElement('div');
             playerElement.classList.add('player');
             
-            if (player.id === this.playerId) {
+            if (player.id === this.state.playerId) {
                 playerElement.classList.add('current-player');
             }
             
@@ -720,631 +328,22 @@ const ConnectionManager = {
             colorIndicator.style.backgroundColor = player.color;
             
             const nameSpan = document.createElement('span');
-            nameSpan.textContent = player.name + (player.id === this.playerId ? ' (You)' : '');
+            nameSpan.textContent = player.name + (player.id === this.state.playerId ? ' (You)' : '');
             
             playerElement.appendChild(colorIndicator);
             playerElement.appendChild(nameSpan);
             
             this.elements.playersContainer.appendChild(playerElement);
         });
-    },
-    
-    /**
-     * Show connection info for manual sharing with improved UI
-     * @param {Object} connectionInfo Connection info to share
-     */
-    showConnectionInfo: function(connectionInfo) {
-        console.log('[ConnectionManager] Showing connection info');
-        
-        // Create modal for connection info
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.style.display = 'flex';
-        
-        const infoString = JSON.stringify(connectionInfo);
-        
-        const content = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Share Connection Info</h2>
-                </div>
-                <div class="modal-body">
-                    <p>Copy this text and send it to your friend to join your game:</p>
-                    <textarea id="connection-info-text" readonly rows="5" style="width:100%">${infoString}</textarea>
-                    
-                    <div class="modal-buttons" style="margin-top: 10px;">
-                        <button id="copy-connection-button" class="modal-button primary-button">
-                            <i class="fas fa-copy"></i> Copy to Clipboard
-                        </button>
-                    </div>
-                    
-                    <hr style="margin: 20px 0;">
-                    
-                    <h3>Enter Friend's Response</h3>
-                    <p>After sending the connection info, paste your friend's response here:</p>
-                    <textarea id="connection-response" rows="5" style="width:100%" 
-                        placeholder="Paste your friend's response here"></textarea>
-                </div>
-                <div class="modal-buttons">
-                    <button id="process-response-button" class="modal-button primary-button">Connect</button>
-                    <button id="close-connection-modal" class="modal-button secondary-button">Close</button>
-                </div>
-            </div>
-        `;
-        
-        modal.innerHTML = content;
-        document.body.appendChild(modal);
-        
-        // Store reference to the modal
-        this.elements.connectionInfoContainer = modal;
-        
-        // Add event listeners
-        document.getElementById('copy-connection-button').addEventListener('click', () => {
-            const textArea = document.getElementById('connection-info-text');
-            textArea.select();
-            document.execCommand('copy');
-            this.showNotification('Copied!', 'Connection info copied to clipboard', 'success');
-        });
-        
-        document.getElementById('process-response-button').addEventListener('click', () => {
-            const response = document.getElementById('connection-response').value;
-            try {
-                const responseObj = JSON.parse(response);
-                this.processConnectionInfo(responseObj);
-            } catch (e) {
-                this.showNotification('Error', 'Invalid response. Please check and try again.', 'error');
-            }
-        });
-        
-        document.getElementById('close-connection-modal').addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
-        
-        // Close when clicking outside
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-    },
-    
-    /**
-     * Show answer info for responder to share back with improved UI
-     * @param {Object} answerInfo Answer info
-     */
-    showAnswerInfo: function(answerInfo) {
-        console.log('[ConnectionManager] Showing answer info');
-        
-        // Create modal for answer info
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.style.display = 'flex';
-        
-        const infoString = JSON.stringify(answerInfo);
-        
-        const content = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Your Connection Response</h2>
-                </div>
-                <div class="modal-body">
-                    <p>Copy this text and send it back to the person who invited you:</p>
-                    <textarea id="answer-info-text" readonly rows="5" style="width:100%">${infoString}</textarea>
-                </div>
-                <div class="modal-buttons">
-                    <button id="copy-answer-button" class="modal-button primary-button">
-                        <i class="fas fa-copy"></i> Copy to Clipboard
-                    </button>
-                    <button id="close-answer-modal" class="modal-button secondary-button">Close</button>
-                </div>
-            </div>
-        `;
-        
-        modal.innerHTML = content;
-        document.body.appendChild(modal);
-        
-        // Store reference to the modal
-        this.elements.answerInfoContainer = modal;
-        
-        // Add event listeners
-        document.getElementById('copy-answer-button').addEventListener('click', () => {
-            const textArea = document.getElementById('answer-info-text');
-            textArea.select();
-            document.execCommand('copy');
-            this.showNotification('Copied!', 'Response copied to clipboard', 'success');
-        });
-        
-        document.getElementById('close-answer-modal').addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
-        
-        // Close when clicking outside
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-    },
-    
-    /**
-     * Hide connection info containers
-     */
-    hideConnectionInfo: function() {
-        console.log('[ConnectionManager] Hiding connection info containers');
-        
-        if (this.elements.connectionInfoContainer) {
-            this.elements.connectionInfoContainer.style.display = 'none';
-        }
-        
-        if (this.elements.answerInfoContainer) {
-            this.elements.answerInfoContainer.style.display = 'none';
-        }
-        
-        // Also remove by ID
-        const containers = [
-            document.getElementById('connection-info-container'),
-            document.getElementById('answer-info-container'),
-            document.getElementById('manual-connection-modal')
-        ];
-        
-        containers.forEach(container => {
-            if (container) container.style.display = 'none';
-        });
-    },
-    
-    /**
-     * Show manual connection input with improved UI
-     * @param {string} roomId Optional room ID to pre-fill
-     */
-    showManualConnectionInput: function(roomId = '') {
-        console.log('[ConnectionManager] Showing manual connection input');
-        
-        // Create connection info modal
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.id = 'manual-connection-modal';
-        modal.style.display = 'flex';
-        
-        const content = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Manual Connection</h2>
-                </div>
-                <div class="modal-body">
-                    <p>Ask your friend to create a room and share their connection info with you:</p>
-                    
-                    <textarea id="manual-connection-input" rows="5" style="width:100%" 
-                        placeholder="Paste connection info here"></textarea>
-                </div>
-                <div class="modal-buttons">
-                    <button id="connect-manual-button" class="modal-button primary-button">Connect</button>
-                    <button id="close-manual-modal" class="modal-button secondary-button">Cancel</button>
-                </div>
-            </div>
-        `;
-        
-        modal.innerHTML = content;
-        document.body.appendChild(modal);
-        
-        // Add event listeners
-        document.getElementById('connect-manual-button').addEventListener('click', () => {
-            const input = document.getElementById('manual-connection-input').value.trim();
-            if (input) {
-                modal.style.display = 'none';
-                this.joinRoom(input);
-            } else {
-                this.showNotification('Error', 'Please paste connection information', 'error');
-            }
-        });
-        
-        document.getElementById('close-manual-modal').addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
-        
-        // Close when clicking outside
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-    },
-    
-    /**
-     * Show connection troubleshooting guide with improved UI
-     */
-    showTroubleshooting: function() {
-        console.log('[ConnectionManager] Showing troubleshooting guide');
-        
-        // Get existing troubleshooting modal
-        let troubleshootingModal = document.getElementById('connectivity-guide');
-        
-        // If it doesn't exist, create it
-        if (!troubleshootingModal) {
-            troubleshootingModal = document.createElement('div');
-            troubleshootingModal.id = 'connectivity-guide';
-            troubleshootingModal.className = 'modal';
-            
-            const content = `
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h2>Connection Troubleshooting</h2>
-                    </div>
-                    <div class="modal-body">
-                        <p>If you're having trouble connecting:</p>
-                        <ol>
-                            <li>Make sure both users are using modern browsers (Chrome, Firefox, Edge)</li>
-                            <li>Try refreshing the page and attempting the connection again</li>
-                            <li>Disable any VPNs or firewalls that might block WebRTC</li>
-                            <li>If you're behind a corporate network, it may block WebRTC connections</li>
-                            <li>Try connecting from a different network or using a mobile hotspot</li>
-                        </ol>
-                        
-                        <div class="webrtc-info">
-                            <p><i class="fas fa-info-circle"></i> This app uses WebRTC for direct peer-to-peer connections</p>
-                            <p>Some networks may require TURN servers for successful connections</p>
-                        </div>
-                    </div>
-                    <div class="modal-buttons">
-                        <button id="show-diagnostics" class="modal-button primary-button">Show Diagnostics</button>
-                        <button id="show-manual" class="modal-button primary-button">Try Manual Connection</button>
-                        <button id="close-guide" class="modal-button secondary-button">Close</button>
-                    </div>
-                </div>
-            `;
-            
-            troubleshootingModal.innerHTML = content;
-            document.body.appendChild(troubleshootingModal);
-            
-            // Add event listeners
-            document.getElementById('show-diagnostics').addEventListener('click', () => {
-                this.showDiagnostics();
-            });
-            
-            document.getElementById('show-manual').addEventListener('click', () => {
-                troubleshootingModal.style.display = 'none';
-                this.showManualConnectionInput();
-            });
-            
-            document.getElementById('close-guide').addEventListener('click', () => {
-                troubleshootingModal.style.display = 'none';
-            });
-            
-            // Close when clicking outside
-            troubleshootingModal.addEventListener('click', (e) => {
-// Export ConnectionManager to the global window object
-window.ConnectionManager = ConnectionManager;
-console.log('[connection-manager.js] Explicitly exported ConnectionManager to global scope:', !!window.ConnectionManager);
-})(window);
-                if (e.target === troubleshootingModal) {
-                    troubleshootingModal.style.display = 'none';
-// Add confirmation at the end of the file
-console.log('[connection-manager.js] Script fully executed, ConnectionManager object created:', !!window.ConnectionManager);
+    }
 
-// Verify SimpleWebRTC dependency
-if (typeof SimpleWebRTC === 'undefined') {
-    console.error('[ConnectionManager] SimpleWebRTC dependency not found - this will cause failures');
-}
-                }
-            });
-        }
-        
-        // Show the modal
-        troubleshootingModal.style.display = 'flex';
-    },
-    
-    /**
-     * Show connection diagnostics with improved UI
-     */
-    showDiagnostics: function() {
-        console.log('[ConnectionManager] Showing connection diagnostics');
-        
-        // Get diagnostic info
-        const diagnosticInfo = SimpleWebRTC.diagnosticInfo();
-        
-        // Create diagnostics modal
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.id = 'diagnostics-modal';
-        modal.style.display = 'flex';
-        
-        // Format connection info
-        let connectionInfoHtml = '';
-        if (diagnosticInfo.connection !== 'No connection') {
-            connectionInfoHtml = `
-                <tr><td>Connection State:</td><td>${diagnosticInfo.connection.connectionState || 'unknown'}</td></tr>
-                <tr><td>ICE Connection State:</td><td>${diagnosticInfo.connection.iceConnectionState || 'unknown'}</td></tr>
-                <tr><td>ICE Gathering State:</td><td>${diagnosticInfo.connection.iceGatheringState || 'unknown'}</td></tr>
-                <tr><td>Signaling State:</td><td>${diagnosticInfo.connection.signalingState || 'unknown'}</td></tr>
-            `;
-        } else {
-            connectionInfoHtml = `<tr><td colspan="2">No active connection</td></tr>`;
-        }
-        
-        // Format data channel info
-        let channelInfoHtml = '';
-        if (diagnosticInfo.dataChannel !== 'No channel') {
-            channelInfoHtml = `
-                <tr><td>Data Channel Label:</td><td>${diagnosticInfo.dataChannel.label || 'unknown'}</td></tr>
-                <tr><td>Data Channel State:</td><td>${diagnosticInfo.dataChannel.readyState || 'unknown'}</td></tr>
-                <tr><td>Buffered Amount:</td><td>${diagnosticInfo.dataChannel.bufferedAmount || '0'}</td></tr>
-            `;
-        } else {
-            channelInfoHtml = `<tr><td colspan="2">No data channel</td></tr>`;
-        }
-        
-        // Format network info
-        let networkInfoHtml = '';
-        if (diagnosticInfo.networkInfo !== 'N/A') {
-            networkInfoHtml = `
-                <tr><td>Connection Type:</td><td>${diagnosticInfo.networkInfo.type || 'unknown'}</td></tr>
-                <tr><td>Effective Type:</td><td>${diagnosticInfo.networkInfo.effectiveType || 'unknown'}</td></tr>
-                <tr><td>Downlink:</td><td>${diagnosticInfo.networkInfo.downlink || 'unknown'} Mbps</td></tr>
-                <tr><td>RTT:</td><td>${diagnosticInfo.networkInfo.rtt || 'unknown'} ms</td></tr>
-            `;
-        } else {
-            networkInfoHtml = `<tr><td colspan="2">Network information not available</td></tr>`;
-        }
-        
-        const content = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Connection Diagnostics</h2>
-                </div>
-                <div class="modal-body">
-                    <h3>Browser Information</h3>
-                    <table class="diagnostic-table">
-                        <tr><td>User Agent:</td><td>${diagnosticInfo.browserInfo}</td></tr>
-                        <tr><td>WebRTC Support:</td><td>${diagnosticInfo.webrtcSupport ? 'Yes' : 'No'}</td></tr>
-                    </table>
-                    
-                    <h3>Connection State</h3>
-                    <table class="diagnostic-table">
-                        ${connectionInfoHtml}
-                        <tr><td>ICE Candidates Gathered:</td><td>${diagnosticInfo.candidatesGathered}</td></tr>
-                        <tr><td>Pending Candidates:</td><td>${diagnosticInfo.pendingCandidates}</td></tr>
-                    </table>
-                    
-                    <h3>Data Channel</h3>
-                    <table class="diagnostic-table">
-                        ${channelInfoHtml}
-                    </table>
-                    
-                    <h3>Connection Status</h3>
-                    <table class="diagnostic-table">
-                        <tr><td>Is Initiator:</td><td>${diagnosticInfo.state.isInitiator}</td></tr>
-                        <tr><td>Is Connected:</td><td>${diagnosticInfo.state.isConnected}</td></tr>
-                        <tr><td>Is Connecting:</td><td>${diagnosticInfo.state.isConnecting}</td></tr>
-                        <tr><td>Retry Count:</td><td>${diagnosticInfo.state.retryCount}</td></tr>
-                    </table>
-                    
-                    <h3>Network Information</h3>
-                    <table class="diagnostic-table">
-                        ${networkInfoHtml}
-                    </table>
-                    
-                    <h3>Mentalplayer State</h3>
-                    <table class="diagnostic-table">
-                        <tr><td>Player ID:</td><td>${this.playerId}</td></tr>
-                        <tr><td>Room ID:</td><td>${this.roomId || 'Not in a room'}</td></tr>
-                        <tr><td>Is Room Creator:</td><td>${this.isRoomCreator}</td></tr>
-                        <tr><td>Player Count:</td><td>${Object.keys(this.players).length}</td></tr>
-                        <tr><td>Current Game:</td><td>${this.gameModule ? this.gameModule.type : 'None'}</td></tr>
-                    </table>
-                    
-                    <p style="margin-top: 20px;"><strong>Tip:</strong> Copy this information when reporting connection issues.</p>
-                </div>
-                <div class="modal-buttons">
-                    <button id="fix-connection" class="modal-button primary-button">Fix Connection</button>
-                    <button id="copy-diagnostics" class="modal-button primary-button">Copy Info</button>
-                    <button id="close-diagnostics" class="modal-button secondary-button">Close</button>
-                </div>
-            </div>
-        `;
-        
-        modal.innerHTML = content;
-        document.body.appendChild(modal);
-        
-        // Add CSS for diagnostics table
-        const style = document.createElement('style');
-        style.textContent = `
-            .diagnostic-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 10px;
-            }
-            .diagnostic-table td {
-                padding: 4px 8px;
-                border-bottom: 1px solid #eee;
-            }
-            .diagnostic-table tr td:first-child {
-                font-weight: bold;
-                width: 40%;
-            }
-        `;
-        document.head.appendChild(style);
-        
-        // Add event listeners
-        document.getElementById('fix-connection').addEventListener('click', () => {
-            this.reinitializeConnection();
-            modal.style.display = 'none';
-        });
-        
-        document.getElementById('copy-diagnostics').addEventListener('click', () => {
-            const diagnosticText = JSON.stringify(diagnosticInfo, null, 2);
-            this.copyToClipboard(diagnosticText);
-            this.showNotification('Copied', 'Diagnostic information copied to clipboard', 'success');
-        });
-        
-        document.getElementById('close-diagnostics').addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
-        
-        // Close when clicking outside
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
-    },
-    
-    /**
-     * Reinitialize the connection to fix issues
-     */
-    reinitializeConnection: function() {
-        console.log('[ConnectionManager] Reinitializing connection');
-        
-        // Disconnect current connection
-        SimpleWebRTC.disconnect();
-        
-        // Reset state
-        this.roomId = '';
-        this.isRoomCreator = false;
-        
-        // Keep only self in players list
-        const currentPlayerData = this.players[this.playerId];
-        this.players = {};
-        if (currentPlayerData) {
-            this.players[this.playerId] = currentPlayerData;
-        }
-        
-        // Sync with AppState
-        if (typeof AppState !== 'undefined') {
-            AppState.roomId = '';
-            AppState.isRoomCreator = false;
-            AppState.players = { ...this.players };
-        }
-        
-        // Hide room info
-        if (this.elements.roomInfo) {
-            this.elements.roomInfo.style.display = 'none';
-        }
-        
-        // Update UI
-        this.updatePlayersList();
-        this.updateConnectionStatus('initialized', 'Reinitialized');
-        
-        // System message
-        this.addChatMessage('system', 'Connection reinitialized. You can now create or join a room.');
-        
-        // Show notification
-        this.showNotification('Reinitialized', 'Connection has been reinitialized', 'info');
-        
-        // Initialize WebRTC again
-        SimpleWebRTC.init({
-            callbacks: {
-                onConnected: () => this.handleConnected(),
-                onDisconnected: () => this.handleDisconnected(),
-                onMessage: (message) => this.handleMessage(message),
-                onError: (message, error) => this.handleError(message, error),
-                onStatusChange: (status, message) => this.updateConnectionStatus(status, message),
-                onNewIceCandidate: (candidate) => this.handleNewIceCandidate(candidate),
-                onReconnectAttempt: (peerId) => this.handleReconnectAttempt(peerId)
-            }
-        });
-        
-        // Hide any open connection modals
-        this.hideConnectionInfo();
-    },
-    
-    /**
-     * Add a chat message
-     * @param {string} senderId Sender ID or 'system'
-     * @param {string} text Message text
-     */
-    addChatMessage: function(senderId, text) {
-        console.log(`[ConnectionManager] Adding chat message from ${senderId}: ${text}`);
-        
-        const isSystem = senderId === 'system';
-        const chatMessages = document.getElementById('chat-messages');
-        
-        if (!chatMessages) {
-            console.warn('[ConnectionManager] Chat messages container not found');
-            return;
-        }
-        
-        const messageElement = document.createElement('div');
-        messageElement.className = isSystem ? 'system-message' : 
-            (senderId === this.playerId ? 'chat-message own-message' : 'chat-message peer-message');
-        
-        let messageContent = '';
-        
-        // Add sender name for peer messages
-        if (!isSystem && senderId !== this.playerId) {
-            const senderName = this.players[senderId] ? this.players[senderId].name : 'Unknown Player';
-            const senderColor = this.players[senderId] && this.players[senderId].color ? 
-                this.players[senderId].color : '#808080';
-                
-            messageContent += `<div class="message-sender" style="color: ${senderColor}">${senderName}</div>`;
-        }
-        
-        // Add message text
-        messageContent += `<div class="message-text">${text}</div>`;
-        
-        messageElement.innerHTML = messageContent;
-        chatMessages.appendChild(messageElement);
-        
-        // Scroll to bottom
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-        
-        // Play notification sound for messages from others
-        if (senderId !== this.playerId && !isSystem) {
-            this.playNotificationSound();
-        }
-    },
-    
-    /**
-     * Play notification sound for new messages
-     */
-    playNotificationSound: function() {
-        try {
-            // Create a simple beep sound
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const oscillator = audioContext.createOscillator();
-            const gainNode = audioContext.createGain();
-            
-            oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(440, audioContext.currentTime); // A4 note
-            gainNode.gain.setValueAtTime(0.1, audioContext.currentTime); // Low volume
-            
-            oscillator.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            
-            oscillator.start();
-            oscillator.stop(audioContext.currentTime + 0.1); // Short beep
-        } catch (e) {
-            console.warn('[ConnectionManager] Could not play notification sound:', e);
-        }
-    },
-    
-    /**
-     * Copy text to clipboard
-     * @param {string} text Text to copy
-     */
-    copyToClipboard: function(text) {
-        const textarea = document.createElement('textarea');
-        textarea.textContent = text;
-        textarea.style.position = 'fixed';
-        document.body.appendChild(textarea);
-        textarea.select();
-        
-        try {
-            document.execCommand('copy');
-        } catch (ex) {
-            console.warn('[ConnectionManager] Copy to clipboard failed:', ex);
-        } finally {
-            document.body.removeChild(textarea);
-        }
-    },
-    
     /**
      * Show notification
      * @param {string} title Notification title
      * @param {string} message Notification message
      * @param {string} type Notification type (info, success, warning, error)
      */
-    showNotification: function(title, message, type = 'info') {
-        console.log(`[ConnectionManager] Showing notification: ${title} - ${message} (${type})`);
-        
+    showNotification(title, message, type = 'info') {
         // Create container if not exists
         let container = document.getElementById('notification-container');
         if (!container) {
@@ -1382,14 +381,498 @@ if (typeof SimpleWebRTC === 'undefined') {
                 setTimeout(() => notification.remove(), 300);
             }
         }, 5000);
-    },
-    
+    }
+
+    /**
+     * Add a chat message to the chat display
+     * @param {string} senderId Sender ID or 'system'
+     * @param {string} text Message text
+     */
+    addChatMessage(senderId, text) {
+        const isSystem = senderId === 'system';
+        const chatMessages = document.getElementById('chat-messages');
+        
+        if (!chatMessages) return;
+        
+        const messageElement = document.createElement('div');
+        messageElement.className = isSystem ? 'system-message' : 
+            (senderId === this.state.playerId ? 'chat-message own-message' : 'chat-message peer-message');
+        
+        let messageContent = '';
+        
+        // Add sender name for peer messages
+        if (!isSystem && senderId !== this.state.playerId) {
+            const senderName = this.state.players[senderId] ? this.state.players[senderId].name : 'Unknown Player';
+            const senderColor = this.state.players[senderId] && this.state.players[senderId].color ? 
+                this.state.players[senderId].color : '#808080';
+                
+            messageContent += `<div class="message-sender" style="color: ${senderColor}">${senderName}</div>`;
+        }
+        
+        // Add message text
+        messageContent += `<div class="message-text">${text}</div>`;
+        
+        messageElement.innerHTML = messageContent;
+        chatMessages.appendChild(messageElement);
+        
+        // Scroll to bottom
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    /**
+     * Display diagnostic information
+     * @returns {Object} Diagnostic information
+     */
+    diagnosticInfo() {
+        const info = {
+            initialized: this.state.initialized,
+            connected: this.state.connected,
+            connecting: this.state.connecting,
+            roomId: this.state.roomId,
+            isRoomCreator: this.state.isRoomCreator,
+            playerId: this.state.playerId,
+            playerCount: Object.keys(this.state.players).length,
+            peerJsVersion: typeof Peer !== 'undefined' ? 'Loaded' : 'Not loaded',
+            connectionState: this.state.connection ? 
+                (this.state.connection.open ? 'Open' : 'Closed') : 'No connection',
+            browserInfo: navigator.userAgent
+        };
+        
+        this.log('Diagnostic info:', 2);
+        this.log(info, 2);
+        
+        return info;
+    }
+
+    /* Private methods */
+
+    /**
+     * Load the PeerJS library
+     * @returns {Promise} Promise that resolves when PeerJS is loaded
+     */
+    _loadPeerJS() {
+        return new Promise((resolve, reject) => {
+            if (typeof Peer !== 'undefined') {
+                resolve();
+                return;
+            }
+            
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js';
+            script.async = true;
+            
+            script.onload = () => {
+                this.log('PeerJS loaded successfully');
+                resolve();
+            };
+            
+            script.onerror = () => {
+                reject(new Error('Failed to load PeerJS'));
+            };
+            
+            document.head.appendChild(script);
+        });
+    }
+
+    /**
+     * Initialize the PeerJS instance
+     */
+    _initializePeer() {
+        try {
+            // Create a random ID if not specified
+            const peerId = this._generateId();
+            this.state.playerId = peerId;
+            
+            this.log(`Initializing PeerJS with ID: ${peerId}`);
+            
+            // Create the Peer object
+            this.state.peer = new Peer(peerId, {
+                debug: this.config.debug > 1 ? 2 : 0,
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        {
+                            urls: 'turn:openrelay.metered.ca:80',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        }
+                    ],
+                    'iceCandidatePoolSize': 10
+                }
+            });
+            
+            // Set up peer event handlers
+            this.state.peer.on('open', (id) => {
+                this.log(`PeerJS connection opened with ID: ${id}`);
+                this.state.initialized = true;
+                this.state.playerId = id;
+                
+                // Add self to players list
+                this.state.players[id] = {
+                    id: id,
+                    name: this.state.playerName,
+                    color: this._getRandomColor(),
+                    isCreator: false
+                };
+                
+                this.updateStatus('initialized', 'Ready to connect');
+                this.updatePlayersList();
+            });
+            
+            this.state.peer.on('connection', (conn) => {
+                this.log(`Incoming connection from: ${conn.peer}`);
+                
+                // Accept the connection if we're the room creator
+                if (this.state.isRoomCreator) {
+                    this._setupConnectionListeners(conn);
+                } else {
+                    this.log('Rejecting connection as we are not the room creator', 1);
+                    conn.close();
+                }
+            });
+            
+            this.state.peer.on('error', (err) => {
+                this.log('PeerJS error: ' + err, 0);
+                
+                if (err.type === 'peer-unavailable') {
+                    this.showNotification('Connection Error', 'Could not find the specified room. Please check the Room ID and try again.', 'error');
+                    this.state.connecting = false;
+                    this.updateStatus('error', 'Room not found');
+                } else {
+                    this.showNotification('Connection Error', `${err.type}: ${err.message}`, 'error');
+                    this.updateStatus('error', err.type);
+                }
+            });
+            
+            this.state.peer.on('disconnected', () => {
+                this.log('PeerJS disconnected from signaling server');
+                this.updateStatus('disconnected', 'Disconnected from signaling server');
+                
+                // Attempt to reconnect
+                setTimeout(() => {
+                    if (this.state.peer) {
+                        this.log('Attempting to reconnect to signaling server');
+                        this.state.peer.reconnect();
+                    }
+                }, 5000);
+            });
+            
+            this.state.peer.on('close', () => {
+                this.log('PeerJS connection closed');
+                this.state.initialized = false;
+                this.updateStatus('disconnected', 'Connection closed');
+                this.leaveRoom();
+            });
+        } catch (error) {
+            this.log('Error initializing peer: ' + error, 0);
+            this.updateStatus('error', 'Failed to initialize');
+            this.showNotification('Initialization Error', 'Failed to initialize connection system. Please refresh the page.', 'error');
+        }
+    }
+
+    /**
+     * Set up listeners for a peer connection
+     * @param {Object} conn PeerJS connection object
+     */
+    _setupConnectionListeners(conn) {
+        conn.on('open', () => {
+            this._handleConnectionOpen(conn);
+        });
+        
+        conn.on('data', (data) => {
+            this._handleConnectionData(conn, data);
+        });
+        
+        conn.on('close', () => {
+            this._handleConnectionClose(conn);
+        });
+        
+        conn.on('error', (err) => {
+            this._handleConnectionError(conn, err);
+        });
+    }
+
+    /**
+     * Handle connection open event
+     * @param {Object} conn PeerJS connection object
+     */
+    _handleConnectionOpen(conn) {
+        this.log(`Connection opened with peer: ${conn.peer}`);
+        this.state.connected = true;
+        this.state.connecting = false;
+        
+        // If we're not the room creator, store the connection
+        if (!this.state.isRoomCreator) {
+            this.state.connection = conn;
+        }
+        
+        this.updateStatus('connected', 'Connected');
+        
+        // Send player info
+        conn.send({
+            type: 'player_info',
+            senderId: this.state.playerId,
+            name: this.state.playerName,
+            color: this.state.players[this.state.playerId].color,
+            gameType: this.state.gameModule ? this.state.gameModule.type : null
+        });
+        
+        // If we're the room creator, send current players list to the new peer
+        if (this.state.isRoomCreator) {
+            conn.send({
+                type: 'players_list',
+                senderId: this.state.playerId,
+                players: this.state.players
+            });
+            
+            // Also send game state if we have a game module
+            if (this.state.gameModule && typeof this.state.gameModule.sendGameState === 'function') {
+                setTimeout(() => {
+                    this.log('Sending game state to new peer');
+                    this.state.gameModule.sendGameState(this);
+                }, 1000);
+            }
+        }
+        
+        // Start heartbeat if we're the room creator
+        if (this.state.isRoomCreator && !this.heartbeatTimer) {
+            this._startHeartbeat();
+        }
+    }
+
+    /**
+     * Handle connection data event
+     * @param {Object} conn PeerJS connection object
+     * @param {Object} data Data received
+     */
+    _handleConnectionData(conn, data) {
+        if (!data || !data.type || !data.senderId) return;
+        
+        // Don't log ping/pong messages to avoid console noise
+        if (data.type !== 'ping' && data.type !== 'pong') {
+            this.log(`Received data from ${conn.peer}:`, 2);
+            this.log(data, 2);
+        }
+        
+        switch (data.type) {
+            case 'player_info':
+                // Add player to list
+                this.state.players[data.senderId] = {
+                    id: data.senderId,
+                    name: data.name,
+                    color: data.color || this._getRandomColor(),
+                    isCreator: this.state.isRoomCreator ? false : true
+                };
+                
+                this.updatePlayersList();
+                this.showNotification('Player Joined', `${data.name} has joined the game.`, 'info');
+                this.addChatMessage('system', `${data.name} has joined the room.`);
+                
+                // If we're the room creator and they specified a game type, switch to it
+                if (this.state.isRoomCreator && data.gameType && 
+                    this.state.gameModule && this.state.gameModule.type !== data.gameType &&
+                    typeof selectGame === 'function') {
+                    selectGame(data.gameType, false);
+                }
+                break;
+                
+            case 'players_list':
+                // Update our players list with the server's version
+                if (!this.state.isRoomCreator && data.players) {
+                    // Keep our own player info
+                    const ourPlayer = this.state.players[this.state.playerId];
+                    this.state.players = data.players;
+                    if (ourPlayer) {
+                        this.state.players[this.state.playerId] = ourPlayer;
+                    }
+                    
+                    this.updatePlayersList();
+                }
+                break;
+                
+            case 'chat_message':
+                this.addChatMessage(data.senderId, data.message);
+                break;
+                
+            case 'ping':
+                // Auto-respond to pings
+                conn.send({
+                    type: 'pong',
+                    senderId: this.state.playerId,
+                    timestamp: data.timestamp
+                });
+                break;
+                
+            case 'pong':
+                // Process pong response if needed
+                break;
+                
+            default:
+                // Pass game-specific messages to the game module
+                if (this.state.gameModule && typeof this.state.gameModule.handlePeerMessage === 'function') {
+                    this.state.gameModule.handlePeerMessage(data.senderId, data);
+                } 
+                // Or pass to app's handler if available
+                else if (typeof handlePeerMessage === 'function') {
+                    handlePeerMessage(data.senderId, data);
+                }
+                // Or pass to AppState if available
+                else if (typeof AppState !== 'undefined' && 
+                         AppState.gameModules && 
+                         AppState.currentGame && 
+                         AppState.gameModules[AppState.currentGame] &&
+                         typeof AppState.gameModules[AppState.currentGame].handlePeerMessage === 'function') {
+                    AppState.gameModules[AppState.currentGame].handlePeerMessage(data.senderId, data);
+                }
+                break;
+        }
+        
+        // Forward message to other peers if we're the room creator
+        if (this.state.isRoomCreator && data.senderId !== this.state.playerId) {
+            this._forwardMessageToOtherPeers(data, conn.peer);
+        }
+    }
+
+    /**
+     * Handle connection close event
+     * @param {Object} conn PeerJS connection object
+     */
+    _handleConnectionClose(conn) {
+        this.log(`Connection closed with peer: ${conn.peer}`);
+        
+        if (!this.state.isRoomCreator) {
+            this.state.connected = false;
+            this.state.connection = null;
+            this.updateStatus('disconnected', 'Disconnected from host');
+            this.showNotification('Disconnected', 'You have been disconnected from the room.', 'warning');
+        } else {
+            // Find disconnected player and remove them
+            const disconnectedPlayerId = conn.peer;
+            const playerName = this.state.players[disconnectedPlayerId]?.name || 'Unknown Player';
+            
+            if (this.state.players[disconnectedPlayerId]) {
+                delete this.state.players[disconnectedPlayerId];
+                this.updatePlayersList();
+                this.addChatMessage('system', `${playerName} has left the room.`);
+                this.showNotification('Player Left', `${playerName} has left the game.`, 'info');
+            }
+        }
+    }
+
+    /**
+     * Handle connection error event
+     * @param {Object} conn PeerJS connection object
+     * @param {Error} err Error object
+     */
+    _handleConnectionError(conn, err) {
+        this.log(`Connection error with peer ${conn.peer}: ${err}`, 0);
+        
+        if (!this.state.isRoomCreator) {
+            this.updateStatus('error', 'Connection error');
+            this.showNotification('Connection Error', 'There was an error with the connection. You may need to rejoin the room.', 'error');
+        }
+    }
+
+    /**
+     * Forward a message to all peers except the sender and specified exclusions
+     * @param {Object} data Message data
+     * @param {string} excludePeerId Peer ID to exclude
+     */
+    _forwardMessageToOtherPeers(data, excludePeerId) {
+        if (!this.state.isRoomCreator || !this.state.peer || !this.state.peer.connections) {
+            return;
+        }
+        
+        // Skip certain message types that should not be forwarded
+        if (['ping', 'pong'].includes(data.type)) {
+            return;
+        }
+        
+        // Forward to all other peers
+        Object.keys(this.state.peer.connections).forEach(peerId => {
+            // Skip the sender and any explicitly excluded peers
+            if (peerId === excludePeerId) {
+                return;
+            }
+            
+            const connections = this.state.peer.connections[peerId];
+            connections.forEach(conn => {
+                if (conn.open) {
+                    conn.send(data);
+                }
+            });
+        });
+    }
+
+    /**
+     * Start heartbeat to check connections
+     */
+    _startHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+        }
+        
+        this.heartbeatTimer = setInterval(() => {
+            // Send ping to all connections to check if they're still alive
+            if (this.state.isRoomCreator && this.state.peer && this.state.peer.connections) {
+                Object.keys(this.state.peer.connections).forEach(peerId => {
+                    const connections = this.state.peer.connections[peerId];
+                    connections.forEach(conn => {
+                        if (conn.open) {
+                            conn.send({
+                                type: 'ping',
+                                senderId: this.state.playerId,
+                                timestamp: Date.now()
+                            });
+                        }
+                    });
+                });
+            } 
+            // Send ping to room creator if we're a client
+            else if (!this.state.isRoomCreator && this.state.connection && this.state.connection.open) {
+                this.state.connection.send({
+                    type: 'ping',
+                    senderId: this.state.playerId,
+                    timestamp: Date.now()
+                });
+            }
+        }, this.config.heartbeatInterval);
+    }
+
+    /**
+     * Generate a random ID
+     * @returns {string} Random ID
+     */
+    _generateId() {
+        return Math.random().toString(36).substring(2, 10).toUpperCase();
+    }
+
     /**
      * Get a random color for player identification
+     * @returns {string} Random color in HSL format
      */
-    getRandomColor: function() {
-        // Generate vibrant colors that are easily distinguishable
+    _getRandomColor() {
         const hue = Math.floor(Math.random() * 360);
         return `hsl(${hue}, 70%, 60%)`;
     }
-};
+
+    /**
+     * Log a message with the specified level
+     * @param {string|Object} message Message to log
+     * @param {number} level Log level (0: errors, 1: warnings, 2: all)
+     */
+    log(message, level = 2) {
+        if (level <= this.config.debug) {
+            const prefix = '[ConnectionManager]';
+            if (typeof message === 'string') {
+                console.log(`${prefix} ${message}`);
+            } else {
+                console.log(`${prefix} Object:`, message);
+            }
+        }
+    }
+}
+
+// Create a single instance
+window.ConnectionManager = new ConnectionManager();

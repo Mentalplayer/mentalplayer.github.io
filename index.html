@@ -12,6 +12,7 @@
         /* Fallback minimal styles in case external CSS fails to load */
         body {
             font-family: 'Roboto', sans-serif;
+<script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
             margin: 0;
             padding: 0;
             background-color: #f5f7fa;
@@ -595,67 +596,44 @@ document.addEventListener('DOMContentLoaded', function() {
             document.body.appendChild(script);
         }
 
-        /**
-         * Show error message for critical script loading failures
-         */
-        function showLoadingError(failedScripts) {
-            const errorModal = document.createElement('div');
-            errorModal.className = 'modal';
-            errorModal.style.display = 'flex';
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log("DOM loaded, loading scripts");
+        
+        // Basic script loading function
+        function loadScript(src, callback) {
+            const script = document.createElement('script');
+            script.src = src;
+            script.async = false;
             
-            errorModal.innerHTML = `
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h2>Loading Error</h2>
-                    </div>
-                    <div class="modal-body">
-                        <p>Failed to load required scripts:</p>
-                        <ul>
-                            ${failedScripts.map(script => `<li>${script}</li>`).join('')}
-                        </ul>
-                        <p>This may be due to network issues or browser restrictions.</p>
-                    </div>
-                    <div class="modal-buttons">
-                        <button id="retry-loading" class="modal-button primary-button">Retry</button>
-                        <button id="reload-page" class="modal-button secondary-button">Reload Page</button>
-                    </div>
-                </div>
-            `;
+            script.onload = function() {
+                console.log(`Loaded script: ${src}`);
+                if (callback) callback();
+            };
             
-            document.body.appendChild(errorModal);
+            script.onerror = function() {
+                console.error(`Failed to load script: ${src}`);
+                if (callback) callback(new Error(`Failed to load ${src}`));
+            };
             
-            // Add event listeners
-            document.getElementById('retry-loading').addEventListener('click', function() {
-                errorModal.style.display = 'none';
-                loadScriptsSequentially(failedScripts, function(success) {
-                    if (success) {
-                        initializeAfterScriptLoad();
-                    }
+            document.head.appendChild(script);
+        }
+        
+        // Load scripts in sequence
+        loadScript('./connection-manager.js', function() {
+            loadScript('./game-modules.js', function() {
+                loadScript('./minesweeper.js', function() {
+                    loadScript('./app.js', function() {
+                        console.log("All scripts loaded");
+                        // Hide loading message if visible
+                        const cssError = document.getElementById('css-loading-error');
+                        if (cssError) cssError.style.display = 'none';
+                    });
                 });
             });
-            
-            document.getElementById('reload-page').addEventListener('click', function() {
-                window.location.reload(true);
-            });
-        }
-
-        /**
-         * Initialize components after scripts are loaded
-         */
-        function initializeAfterScriptLoad(success) {
-            console.log("Script loading completed, success:", success);
-    <!-- Add direct script tags as a guaranteed fallback -->
-    <script>
-        console.log("Adding direct script tags for critical components");
-        
-        // Function to check if components are loaded
-        function checkComponentsLoaded() {
-            console.log("Checking components: SimpleWebRTC =", typeof SimpleWebRTC, "ConnectionManager =", typeof ConnectionManager);
-            return typeof SimpleWebRTC !== 'undefined' && typeof ConnectionManager !== 'undefined';
-        }
-        
-        // Create script tags with explicit window assignments
-        document.write('<script src="https://webrtc.github.io/adapter/adapter-latest.js"><\/script>');
+        });
+    });
+</script>
         document.write('<script src="./webrtc.js"><\/script>');
         document.write('<script src="./connection-manager.js"><\/script>');
         document.write('<script src="./game-modules.js"><\/script>');

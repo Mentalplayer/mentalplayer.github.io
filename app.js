@@ -192,51 +192,29 @@ function setupStateSyncEvents() {
     
     // Add state sync on player name change
     const originalSavePlayerName = savePlayerName;
-    window.savePlayerName = function(name) {
-        originalSavePlayerName(name);
-        syncStates();
-    };
-    
-    // Initial sync
-    syncStates();
-}
-
 /**
- * Check if CSS has loaded properly
+ * Sync app and connection manager states
  */
-function checkCssLoaded() {
-    console.log('[App] Checking CSS loading status');
+function syncStates() {
+    if (typeof ConnectionManager === 'undefined' || typeof AppState === 'undefined') {
+        console.warn('[App] ConnectionManager or AppState not available for state sync');
+        return;
+    }
     
-    // Basic check for CSS loading status
-    const hasStyles = document.styleSheets.length > 1; // At least one external stylesheet plus inline
-    console.log(`[App] CSS check: ${hasStyles ? 'External stylesheets detected' : 'No external stylesheets detected'}`);
+    // Update AppState from ConnectionManager
+    AppState.playerId = ConnectionManager.state.playerId;
+    AppState.roomId = ConnectionManager.state.roomId;
+    AppState.isRoomCreator = ConnectionManager.state.isRoomCreator;
+    AppState.players = {...ConnectionManager.state.players};
     
-    // Additional check for specific styles
-    const appContainer = document.querySelector('.app-container');
-    if (appContainer) {
-        const containerStyle = window.getComputedStyle(appContainer);
-        if (containerStyle.display !== 'flex') {
-            console.warn('[App] CSS may not be fully loaded or applied');
-            showCssLoadingWarning();
-        }
+    // Update ConnectionManager from AppState
+    ConnectionManager.state.playerName = AppState.playerName;
+    
+    // Update game module reference
+    if (AppState.currentGame && AppState.gameModules[AppState.currentGame]) {
+        ConnectionManager.state.gameModule = AppState.gameModules[AppState.currentGame];
     }
 }
-
-/**
- * Show a warning about CSS loading issues
- */
-function showCssLoadingWarning() {
-    console.log('[App] Showing CSS loading warning');
-    
-    const cssError = document.getElementById('css-loading-error');
-    if (cssError) {
-        cssError.style.display = 'flex';
-    }
-}
-
-/**
- * Load a script dynamically
- */
 function loadScript(src, callback) {
     console.log(`[App] Loading script: ${src}`);
     
