@@ -366,10 +366,15 @@
         </div>
     </div>
     
-    <!-- App Scripts -->
+    <!-- WebRTC Adapter for cross-browser compatibility -->
+    <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+    
+    <!-- App Scripts - Load in the correct order -->
     <script src="./webrtc.js"></script>
     <script src="./connection-manager.js"></script>
     <script src="./game-modules.js"></script>
+    <script src="./minesweeper.js"></script>
+    <script src="./app.js"></script>
 
     <script>
         // Ensure continue button works

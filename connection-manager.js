@@ -1,11 +1,10 @@
 /**
  * Connection Manager for Mentalplayer
- * Integrates SimpleWebRTC with the main application
+ * Provides an interface between the app and SimpleWebRTC
  */
 
 const ConnectionManager = {
     // State
-    webrtc: null,
     playerName: '',
     playerId: '',
     isRoomCreator: false,
@@ -21,8 +20,7 @@ const ConnectionManager = {
         currentRoomId: document.getElementById('current-room-id'),
         playersContainer: document.getElementById('players-container'),
         myConnectionId: document.getElementById('my-connection-id'),
-        manualConnectionContainer: null,
-        answerInputContainer: null
+        connectionInfoContainer: null
     },
     
     /**
@@ -32,39 +30,34 @@ const ConnectionManager = {
     init: function(options = {}) {
         console.log('Initializing Connection Manager...');
         
-        // Load SimpleWebRTC if not already available
+        // Make sure SimpleWebRTC is available
         if (typeof SimpleWebRTC === 'undefined') {
-            this.loadScript('./webrtc.js', () => {
-                this.continueInit(options);
-            });
-        } else {
-            this.continueInit(options);
+            console.error('SimpleWebRTC not found. Please make sure webrtc.js is loaded');
+            return;
         }
-    },
-    
-    /**
-     * Continue initialization after ensuring SimpleWebRTC is loaded
-     * @param {Object} options Configuration options
-     */
-    continueInit: function(options) {
+        
         // Set player info
         this.playerName = options.playerName || localStorage.getItem('playerName') || 'Player';
-        this.elements.playerDisplay.textContent = this.playerName;
         
-        // Update UI elements if they've changed
-        this.updateUIElements();
+        // Update elements references
+        this.updateElements();
         
-        // Initialize WebRTC
-        this.webrtc = SimpleWebRTC;
-        this.playerId = this.webrtc.init({
+        // Initialize WebRTC with callbacks
+        this.playerId = SimpleWebRTC.init({
             callbacks: {
                 onConnected: () => this.handleConnected(),
                 onDisconnected: () => this.handleDisconnected(),
                 onMessage: (message) => this.handleMessage(message),
                 onError: (message, error) => this.handleError(message, error),
-                onStatusChange: (status, message) => this.updateConnectionStatus(status, message)
+                onStatusChange: (status, message) => this.updateConnectionStatus(status, message),
+                onNewIceCandidate: (candidate) => this.handleNewIceCandidate(candidate)
             }
         });
+        
+        // Update player display
+        if (this.elements.playerDisplay) {
+            this.elements.playerDisplay.textContent = this.playerName;
+        }
         
         // Update connection ID display
         if (this.elements.myConnectionId) {
@@ -74,15 +67,18 @@ const ConnectionManager = {
         // Set up event listeners
         this.setupEventListeners();
         
+        // Add adapter.js for better browser compatibility
+        this.loadScript('https://webrtc.github.io/adapter/adapter-latest.js');
+        
         console.log('Connection Manager initialized with ID:', this.playerId);
+        
+        return this.playerId;
     },
     
     /**
-     * Update UI element references
-     * This ensures we have the latest elements if they've been recreated
+     * Update UI element references to ensure we have the latest
      */
-    updateUIElements: function() {
-        // Update basic elements
+    updateElements: function() {
         this.elements.connectionStatus = document.getElementById('connection-status') || this.elements.connectionStatus;
         this.elements.playerDisplay = document.getElementById('player-display') || this.elements.playerDisplay;
         this.elements.roomInfo = document.getElementById('room-info') || this.elements.roomInfo;
@@ -95,23 +91,17 @@ const ConnectionManager = {
      * Set up event listeners for connection-related elements
      */
     setupEventListeners: function() {
-        // Find elements
-        const createRoomButton = document.getElementById('create-room');
-        const joinRoomButton = document.getElementById('join-room');
-        const roomIdInput = document.getElementById('room-id');
-        const invitePlayersButton = document.getElementById('invite-players');
-        const copyMyIdButton = document.getElementById('copy-my-id');
-        const connectToFriendButton = document.getElementById('connect-to-friend');
-        const friendIdInput = document.getElementById('friend-id');
-        
         // Create room button
+        const createRoomButton = document.getElementById('create-room');
         if (createRoomButton) {
             createRoomButton.addEventListener('click', () => this.createRoom());
         }
         
         // Join room button
+        const joinRoomButton = document.getElementById('join-room');
         if (joinRoomButton) {
             joinRoomButton.addEventListener('click', () => {
+                const roomIdInput = document.getElementById('room-id');
                 const roomId = roomIdInput ? roomIdInput.value.trim() : '';
                 if (roomId) {
                     this.joinRoom(roomId);
@@ -121,41 +111,25 @@ const ConnectionManager = {
             });
         }
         
-        // Invite players button
-        if (invitePlayersButton) {
-            invitePlayersButton.addEventListener('click', () => this.showInviteModal());
-        }
-        
-        // Copy my ID button
-        if (copyMyIdButton) {
-            copyMyIdButton.addEventListener('click', () => {
-                this.copyToClipboard(this.playerId);
-                copyMyIdButton.textContent = 'Copied!';
-                setTimeout(() => {
-                    copyMyIdButton.innerHTML = '<i class="fas fa-copy"></i> Copy';
-                }, 2000);
-            });
-        }
-        
-        // Connect to friend button
-        if (connectToFriendButton && friendIdInput) {
-            connectToFriendButton.addEventListener('click', () => {
-                const friendId = friendIdInput.value.trim();
-                if (friendId) {
-                    this.joinRoom(friendId);
-                } else {
-                    alert('Please enter your friend\'s ID');
-                }
-            });
+        // Add diagnostic button to troubleshooting
+        const webrtcInfo = document.querySelector('.webrtc-info');
+        if (webrtcInfo) {
+            const diagnosticButton = document.createElement('button');
+            diagnosticButton.id = 'diagnostic-button';
+            diagnosticButton.className = 'button secondary-button';
+            diagnosticButton.innerHTML = '<i class="fas fa-stethoscope"></i> Connection Diagnostics';
+            diagnosticButton.addEventListener('click', () => this.showDiagnostics());
+            
+            webrtcInfo.appendChild(diagnosticButton);
         }
     },
     
     /**
      * Create a new room as initiator
      */
-    async createRoom() {
-        // Ensure a game is selected
-        if (!this.gameModule) {
+    createRoom: async function() {
+        // Check if game is selected
+        if (!this.gameModule && typeof AppState !== 'undefined' && !AppState.currentGame) {
             alert('Please select a game first.');
             return;
         }
@@ -172,121 +146,126 @@ const ConnectionManager = {
         
         // Set as room creator
         this.isRoomCreator = true;
-        this.roomId = this.playerId; // Use player ID as room ID
+        this.roomId = this.playerId;
         
         // Update UI
         this.updateRoomInfo();
         
-        // Create WebRTC connection
-        this.updateConnectionStatus('connecting', 'Creating room...');
-        const connectionInfo = await this.webrtc.createConnection();
-        
-        if (connectionInfo) {
-            // Show connection info for manual sharing
-            this.showConnectionInfo(connectionInfo);
-        } else {
+        try {
+            // Create WebRTC connection
+            this.updateConnectionStatus('connecting', 'Creating room...');
+            const connectionInfo = await SimpleWebRTC.createConnection();
+            
+            if (connectionInfo) {
+                // Show connection info for manual sharing
+                this.showConnectionInfo(connectionInfo);
+                
+                // System message
+                this.addChatMessage('system', 'Room created. Share the connection info with a friend to play together.');
+            } else {
+                this.updateConnectionStatus('error', 'Failed to create room');
+                alert('Failed to create room. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error creating room:', error);
             this.updateConnectionStatus('error', 'Failed to create room');
-            alert('Failed to create room. Please try again.');
+            alert('Error creating room: ' + error.message);
         }
     },
     
     /**
      * Join an existing room as responder
-     * @param {string} roomId Room ID to join
+     * @param {string} roomIdOrInfo Room ID or connection info
      */
-    async joinRoom(roomId) {
-        if (!roomId) return;
-        
-        // Check if trying to join own room
-        if (roomId === this.playerId) {
-            alert('You cannot join your own room this way.');
-            return;
-        }
-        
-        // Check if already in a room
-        if (this.roomId) {
-            if (!confirm('You are already in a room. Would you like to leave and join a new one?')) {
+    joinRoom: async function(roomIdOrInfo) {
+        try {
+            if (!roomIdOrInfo) {
+                alert('Please enter a Room ID or connection info.');
                 return;
             }
             
-            // Leave current room
-            this.leaveRoom();
-        }
-        
-        // Try to join as a direct ID first
-        this.updateConnectionStatus('connecting', 'Joining room...');
-        
-        // If it looks like a connection info object, parse it
-        if (roomId.length > 20 && (roomId.includes('{') || roomId.includes('['))) {
-            try {
-                const connectionInfo = JSON.parse(roomId);
-                await this.processConnectionInfo(connectionInfo);
+            // Check if trying to join own room
+            if (roomIdOrInfo === this.playerId) {
+                alert('You cannot join your own room this way.');
                 return;
-            } catch (e) {
-                console.log('Not a valid connection info object, trying as room ID');
             }
+            
+            // Check if already in a room
+            if (this.roomId) {
+                if (!confirm('You are already in a room. Would you like to leave and join a new one?')) {
+                    return;
+                }
+                
+                // Leave current room
+                this.leaveRoom();
+            }
+            
+            // Try to parse as connection info
+            let connectionInfo;
+            try {
+                if (roomIdOrInfo.length > 20 && (roomIdOrInfo.includes('{') || roomIdOrInfo.startsWith('{'))) {
+                    connectionInfo = JSON.parse(roomIdOrInfo);
+                }
+            } catch (e) {
+                console.log('Not valid JSON, treating as room ID');
+            }
+            
+            if (connectionInfo && (connectionInfo.type === 'offer' || connectionInfo.offer)) {
+                // Process as a connection info object
+                this.processConnectionInfo(connectionInfo);
+            } else {
+                // Treat as a room ID and show manual connection UI
+                this.showManualConnectionInput(roomIdOrInfo);
+            }
+        } catch (error) {
+            console.error('Error joining room:', error);
+            alert('Error joining room: ' + error.message);
         }
-        
-        // Otherwise, show manual connection input
-        this.showManualConnectionInput(roomId);
     },
     
     /**
-     * Process connection info object
+     * Process connection info (offer or answer)
      * @param {Object} connectionInfo Connection information
      */
-    async processConnectionInfo(connectionInfo) {
-        if (!connectionInfo || !connectionInfo.type) {
-            alert('Invalid connection information. Please try again.');
-            return;
-        }
-        
-        if (connectionInfo.type === 'offer') {
-            // Process as an offer (join as responder)
-            this.isRoomCreator = false;
-            this.roomId = connectionInfo.initiatorId;
-            
-            // Update UI
-            this.updateRoomInfo();
-            
-            // Join WebRTC connection
-            const answerInfo = await this.webrtc.joinConnection(connectionInfo);
-            
-            if (answerInfo) {
-                // Show answer info for manual sharing
-                this.showAnswerInfo(answerInfo);
+    processConnectionInfo: async function(connectionInfo) {
+        try {
+            if (!connectionInfo) {
+                throw new Error('Failed to process answer');
+                }
             } else {
-                this.updateConnectionStatus('error', 'Failed to join room');
-                alert('Failed to join room. Please try again.');
+                throw new Error('Unknown connection information type');
             }
-        } else if (connectionInfo.type === 'answer') {
-            // Process as an answer (as initiator)
-            if (!this.isRoomCreator) {
-                alert('Cannot process answer: not a room creator');
-                return;
-            }
-            
-            const result = await this.webrtc.processAnswer(connectionInfo);
-            
-            if (result) {
-                this.updateConnectionStatus('connecting', 'Connection in progress...');
-            } else {
-                this.updateConnectionStatus('error', 'Failed to process answer');
-                alert('Failed to process answer. Please try again.');
-            }
-        } else {
-            alert('Unknown connection information type');
+        } catch (error) {
+            console.error('Error processing connection info:', error);
+            this.updateConnectionStatus('error', error.message);
+            alert(error.message);
         }
+    },
+    
+    /**
+     * Handle new ICE candidate from the local peer
+     * @param {RTCIceCandidate} candidate ICE candidate
+     */
+    handleNewIceCandidate: function(candidate) {
+        // This could be used in trickle ICE implementation to send candidates immediately
+        console.log('New ICE candidate to be sent:', candidate);
+        // We're using gathered candidates instead for simplicity
+    },
+    
+    /**
+     * Add a remote ICE candidate
+     * @param {Object} candidate ICE candidate
+     */
+    addRemoteCandidate: function(candidate) {
+        SimpleWebRTC.addRemoteIceCandidate(candidate);
     },
     
     /**
      * Leave the current room
      */
-    leaveRoom() {
+    leaveRoom: function() {
         // Disconnect WebRTC
-        if (this.webrtc) {
-            this.webrtc.disconnect();
-        }
+        SimpleWebRTC.disconnect();
         
         // Reset state
         this.isRoomCreator = false;
@@ -298,29 +277,33 @@ const ConnectionManager = {
             this.elements.roomInfo.style.display = 'none';
         }
         
-        // Update players list
-        this.updatePlayersList();
+        // Close any connection info modals
+        this.hideConnectionInfo();
         
-        // Update connection status
+        // Update UI
+        this.updatePlayersList();
         this.updateConnectionStatus('disconnected', 'Left room');
+        
+        // System message
+        this.addChatMessage('system', 'Disconnected from room.');
     },
     
     /**
-     * Send data to connected peer
+     * Send data to the connected peer
      * @param {Object} data Data to send
-     * @returns {boolean} Success status
      */
-    sendData(data) {
-        if (!this.webrtc || !data) return false;
-        
-        return this.webrtc.sendData(data);
+    sendData: function(data) {
+        return SimpleWebRTC.sendData(data);
     },
     
     /**
      * Handle successful connection
      */
-    handleConnected() {
-        console.log('Connection established!');
+    handleConnected: function() {
+        console.log('Successfully connected!');
+        
+        // Hide connection info dialogs
+        this.hideConnectionInfo();
         
         // Add self to players list
         this.players[this.playerId] = {
@@ -334,34 +317,40 @@ const ConnectionManager = {
             type: 'player_info',
             name: this.playerName,
             id: this.playerId,
-            gameType: this.gameModule ? this.gameModule.type : null
+            gameType: this.gameModule ? this.gameModule.type : 
+                (typeof AppState !== 'undefined' ? AppState.currentGame : null)
         });
         
         // Update players list
         this.updatePlayersList();
         
-        // Hide connection info
-        this.hideConnectionInfo();
-        
         // Show success notification
         this.showNotification('Connected!', 'Connection established successfully.', 'success');
+        
+        // Add system message
+        this.addChatMessage('system', 'Connection established!');
     },
     
     /**
      * Handle disconnection
      */
-    handleDisconnected() {
+    handleDisconnected: function() {
         console.log('Disconnected from peer');
         
-        // Remove peer from players list
-        const peerId = Object.keys(this.players).find(id => id !== this.playerId);
-        if (peerId) {
-            const playerName = this.players[peerId].name;
-            delete this.players[peerId];
+        // Find the other player
+        const otherPlayerId = Object.keys(this.players).find(id => id !== this.playerId);
+        if (otherPlayerId) {
+            const playerName = this.players[otherPlayerId].name;
+            delete this.players[otherPlayerId];
+            
+            // Update UI
             this.updatePlayersList();
             
             // Show notification
             this.showNotification('Disconnected', `${playerName} has disconnected.`, 'warning');
+            
+            // Add system message
+            this.addChatMessage('system', `${playerName} has disconnected.`);
         }
     },
     
@@ -369,47 +358,71 @@ const ConnectionManager = {
      * Handle incoming messages
      * @param {Object} message Message data
      */
-    handleMessage(message) {
-        console.log('Received message:', message);
-        
-        if (!message || !message.type) return;
-        
-        switch (message.type) {
-            case 'player_info':
-                // Add player to list
-                this.players[message.id] = {
-                    name: message.name,
-                    id: message.id,
-                    color: message.color || this.getRandomColor(),
-                    gameType: message.gameType
-                };
-                
-                // Update players list
-                this.updatePlayersList();
-                
-                // Show notification
-                this.showNotification('Player Joined', `${message.name} has joined the game.`, 'info');
-                
-                // If we're the room creator and they specified a game type, switch to it
-                if (this.isRoomCreator && message.gameType && this.gameModule && this.gameModule.type !== message.gameType) {
-                    this.selectGame(message.gameType);
-                }
-                break;
-                
-            case 'chat_message':
-                this.addChatMessage(message.senderId, message.text);
-                break;
-                
-            case 'game_data':
-                // Pass to game module
-                if (this.gameModule && this.gameModule.handleGameData) {
-                    this.gameModule.handleGameData(message.data);
-                }
-                break;
-                
-            default:
-                console.log('Unknown message type:', message.type);
-                break;
+    handleMessage: function(message) {
+        try {
+            console.log('Received message:', message);
+            
+            if (!message || !message.type) return;
+            
+            switch (message.type) {
+                case 'player_info':
+                    // Add player to list
+                    this.players[message.id] = {
+                        name: message.name,
+                        id: message.id,
+                        color: message.color || this.getRandomColor(),
+                        gameType: message.gameType
+                    };
+                    
+                    // Update players list
+                    this.updatePlayersList();
+                    
+                    // Show notification
+                    this.showNotification('Player Joined', `${message.name} has joined the game.`, 'info');
+                    
+                    // Add system message
+                    this.addChatMessage('system', `${message.name} has joined the room.`);
+                    
+                    // If we're the room creator and they specified a game type, switch to it
+                    if (this.isRoomCreator && message.gameType && 
+                        this.gameModule && this.gameModule.type !== message.gameType &&
+                        typeof selectGame === 'function') {
+                        selectGame(message.gameType, false);
+                    }
+                    break;
+                    
+                case 'chat_message':
+                    this.addChatMessage(message.senderId, message.message || message.text);
+                    break;
+                    
+                case 'ping':
+                    // Auto-respond to pings for connection testing
+                    this.sendData({
+                        type: 'pong',
+                        timestamp: message.timestamp
+                    });
+                    break;
+                    
+                case 'pong':
+                    // Calculate ping time if monitoring
+                    if (typeof pingMonitor !== 'undefined' && message.timestamp) {
+                        pingMonitor.receivePong(message.senderId, message.timestamp);
+                    }
+                    break;
+                    
+                default:
+                    // Pass to game module or app for handling
+                    if (this.gameModule && this.gameModule.handlePeerMessage) {
+                        this.gameModule.handlePeerMessage(message.senderId, message);
+                    } else if (typeof handlePeerMessage === 'function') {
+                        handlePeerMessage(message.senderId, message);
+                    } else {
+                        console.log('Unhandled message type:', message.type);
+                    }
+                    break;
+            }
+        } catch (error) {
+            console.error('Error handling message:', error);
         }
     },
     
@@ -418,11 +431,14 @@ const ConnectionManager = {
      * @param {string} message Error message
      * @param {Error} error Error object
      */
-    handleError(message, error) {
+    handleError: function(message, error) {
         console.error('Connection error:', message, error);
         
         // Show notification
         this.showNotification('Connection Error', message, 'error');
+        
+        // Add system message
+        this.addChatMessage('system', `Connection error: ${message}`);
     },
     
     /**
@@ -430,7 +446,7 @@ const ConnectionManager = {
      * @param {string} status Status code
      * @param {string} message Status message
      */
-    updateConnectionStatus(status, message) {
+    updateConnectionStatus: function(status, message) {
         if (!this.elements.connectionStatus) return;
         
         // Update class
@@ -459,7 +475,7 @@ const ConnectionManager = {
     /**
      * Update room info display
      */
-    updateRoomInfo() {
+    updateRoomInfo: function() {
         if (!this.elements.roomInfo || !this.elements.currentRoomId) return;
         
         this.elements.roomInfo.style.display = 'block';
@@ -475,7 +491,7 @@ const ConnectionManager = {
     /**
      * Update players list display
      */
-    updatePlayersList() {
+    updatePlayersList: function() {
         if (!this.elements.playersContainer) return;
         
         this.elements.playersContainer.innerHTML = '';
@@ -506,254 +522,390 @@ const ConnectionManager = {
      * Show connection info for manual sharing
      * @param {Object} connectionInfo Connection info to share
      */
-    showConnectionInfo(connectionInfo) {
-        // Create connection info container if it doesn't exist
-        if (!document.getElementById('connection-info-container')) {
-            const container = document.createElement('div');
-            container.id = 'connection-info-container';
-            container.className = 'manual-connection-container';
-            
-            const content = `
-                <div class="connection-info-box">
-                    <h3>Share this connection information</h3>
-                    <p>Copy and share this text with the person you want to play with:</p>
-                    <textarea id="connection-info-text" readonly rows="6" class="connection-text"></textarea>
-                    <div class="connection-actions">
-                        <button id="copy-connection-info" class="button primary-button">
-                            <i class="fas fa-copy"></i> Copy
-                        </button>
-                        <button id="share-connection-info" class="button secondary-button">
-                            <i class="fas fa-share-alt"></i> Share
-                        </button>
-                    </div>
-                    <div id="answer-input-container">
-                        <h3>Enter response from other player</h3>
-                        <p>Paste the response you received from the other player:</p>
-                        <textarea id="answer-input" rows="6" class="connection-text" placeholder="Paste answer here..."></textarea>
-                        <button id="process-answer-button" class="button primary-button">Connect</button>
-                    </div>
+    showConnectionInfo: function(connectionInfo) {
+        // Create modal for connection info
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        
+        const infoString = JSON.stringify(connectionInfo);
+        
+        const content = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Share Connection Info</h2>
                 </div>
-            `;
-            
-            container.innerHTML = content;
-            
-            // Add to page after room info
-            const roomInfo = document.getElementById('room-info');
-            if (roomInfo && roomInfo.parentNode) {
-                roomInfo.parentNode.insertBefore(container, roomInfo.nextSibling);
-            } else {
-                // Fallback - add to game container
-                const gameContainer = document.getElementById('game-container');
-                if (gameContainer) {
-                    gameContainer.prepend(container);
-                }
+                <div class="modal-body">
+                    <p>Copy this text and send it to your friend:</p>
+                    <textarea id="connection-info-text" readonly rows="5" style="width:100%">${infoString}</textarea>
+                    
+                    <div class="modal-buttons" style="margin-top: 10px;">
+                        <button id="copy-connection-button" class="modal-button primary-button">
+                            <i class="fas fa-copy"></i> Copy to Clipboard
+                        </button>
+                    </div>
+                    
+                    <hr style="margin: 20px 0;">
+                    
+                    <h3>Enter Friend's Response</h3>
+                    <p>After sending the connection info, paste your friend's response here:</p>
+                    <textarea id="connection-response" rows="5" style="width:100%" 
+                        placeholder="Paste your friend's response here"></textarea>
+                </div>
+                <div class="modal-buttons">
+                    <button id="process-response-button" class="modal-button primary-button">Connect</button>
+                    <button id="close-connection-modal" class="modal-button secondary-button">Close</button>
+                </div>
+            </div>
+        `;
+        
+        modal.innerHTML = content;
+        document.body.appendChild(modal);
+        
+        // Store reference to the modal
+        this.elements.connectionInfoContainer = modal;
+        
+        // Add event listeners
+        document.getElementById('copy-connection-button').addEventListener('click', () => {
+            const textArea = document.getElementById('connection-info-text');
+            textArea.select();
+            document.execCommand('copy');
+            alert('Connection info copied to clipboard!');
+        });
+        
+        document.getElementById('process-response-button').addEventListener('click', () => {
+            const response = document.getElementById('connection-response').value;
+            try {
+                const responseObj = JSON.parse(response);
+                this.processConnectionInfo(responseObj);
+            } catch (e) {
+                alert('Invalid response. Please check and try again.');
             }
-            
-            // Store reference to container
-            this.elements.manualConnectionContainer = container;
-            this.elements.answerInputContainer = document.getElementById('answer-input-container');
-            
-            // Set up event listeners
-            document.getElementById('copy-connection-info').addEventListener('click', () => {
-                const infoText = document.getElementById('connection-info-text');
-                this.copyToClipboard(infoText.value);
-                
-                // Show success feedback
-                const button = document.getElementById('copy-connection-info');
-                const originalText = button.innerHTML;
-                button.innerHTML = '<i class="fas fa-check"></i> Copied!';
-                
-                setTimeout(() => {
-                    button.innerHTML = originalText;
-                }, 2000);
-            });
-            
-            document.getElementById('share-connection-info').addEventListener('click', () => {
-                const infoText = document.getElementById('connection-info-text').value;
-                this.shareText('Mentalplayer Connection', 'Join my game with this connection info:', infoText);
-            });
-            
-            document.getElementById('process-answer-button').addEventListener('click', () => {
-                const answerText = document.getElementById('answer-input').value.trim();
-                if (answerText) {
-                    try {
-                        const answerInfo = JSON.parse(answerText);
-                        this.processConnectionInfo(answerInfo);
-                    } catch (e) {
-                        alert('Invalid answer format. Please check and try again.');
-                    }
-                } else {
-                    alert('Please paste the answer from the other player.');
-                }
-            });
-        }
+        });
         
-        // Update the connection info text
-        const infoText = document.getElementById('connection-info-text');
-        if (infoText) {
-            infoText.value = JSON.stringify(connectionInfo);
-        }
+        document.getElementById('close-connection-modal').addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
         
-        // Show the container
-        this.elements.manualConnectionContainer.style.display = 'block';
+        // Close when clicking outside
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
     },
     
     /**
-     * Show answer info for responder
-     * @param {Object} answerInfo Answer info to share
+     * Show answer info for responder to share back
+     * @param {Object} answerInfo Answer info
      */
-    showAnswerInfo(answerInfo) {
-        // Create answer info container if it doesn't exist
-        if (!document.getElementById('answer-info-container')) {
-            const container = document.createElement('div');
-            container.id = 'answer-info-container';
-            container.className = 'manual-connection-container';
-            
-            const content = `
-                <div class="connection-info-box">
-                    <h3>Share your response</h3>
-                    <p>Copy and share this text with the person who invited you:</p>
-                    <textarea id="answer-info-text" readonly rows="6" class="connection-text"></textarea>
-                    <div class="connection-actions">
-                        <button id="copy-answer-info" class="button primary-button">
-                            <i class="fas fa-copy"></i> Copy
-                        </button>
-                        <button id="share-answer-info" class="button secondary-button">
-                            <i class="fas fa-share-alt"></i> Share
-                        </button>
-                    </div>
-                    <p class="connection-note">After sharing this, wait for the connection to be established.</p>
+    showAnswerInfo: function(answerInfo) {
+        // Create modal for answer info
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        
+        const infoString = JSON.stringify(answerInfo);
+        
+        const content = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Your Connection Response</h2>
                 </div>
-            `;
-            
-            container.innerHTML = content;
-            
-            // Add to page after room info
-            const roomInfo = document.getElementById('room-info');
-            if (roomInfo && roomInfo.parentNode) {
-                roomInfo.parentNode.insertBefore(container, roomInfo.nextSibling);
-            } else {
-                // Fallback - add to game container
-                const gameContainer = document.getElementById('game-container');
-                if (gameContainer) {
-                    gameContainer.prepend(container);
-                }
+                <div class="modal-body">
+                    <p>Copy this text and send it back to the person who invited you:</p>
+                    <textarea id="answer-info-text" readonly rows="5" style="width:100%">${infoString}</textarea>
+                </div>
+                <div class="modal-buttons">
+                    <button id="copy-answer-button" class="modal-button primary-button">
+                        <i class="fas fa-copy"></i> Copy to Clipboard
+                    </button>
+                    <button id="close-answer-modal" class="modal-button secondary-button">Close</button>
+                </div>
+            </div>
+        `;
+        
+        modal.innerHTML = content;
+        document.body.appendChild(modal);
+        
+        // Store reference to the modal
+        this.elements.answerInfoContainer = modal;
+        
+        // Add event listeners
+        document.getElementById('copy-answer-button').addEventListener('click', () => {
+            const textArea = document.getElementById('answer-info-text');
+            textArea.select();
+            document.execCommand('copy');
+            alert('Response copied to clipboard!');
+        });
+        
+        document.getElementById('close-answer-modal').addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+        
+        // Close when clicking outside
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
             }
-            
-            // Set up event listeners
-            document.getElementById('copy-answer-info').addEventListener('click', () => {
-                const infoText = document.getElementById('answer-info-text');
-                this.copyToClipboard(infoText.value);
-                
-                // Show success feedback
-                const button = document.getElementById('copy-answer-info');
-                const originalText = button.innerHTML;
-                button.innerHTML = '<i class="fas fa-check"></i> Copied!';
-                
-                setTimeout(() => {
-                    button.innerHTML = originalText;
-                }, 2000);
-            });
-            
-            document.getElementById('share-answer-info').addEventListener('click', () => {
-                const infoText = document.getElementById('answer-info-text').value;
-                this.shareText('Mentalplayer Connection Response', 'Here is my response to join your game:', infoText);
-            });
-        }
-        
-        // Update the answer info text
-        const infoText = document.getElementById('answer-info-text');
-        if (infoText) {
-            infoText.value = JSON.stringify(answerInfo);
-        }
-        
-        // Show the container
-        document.getElementById('answer-info-container').style.display = 'block';
+        });
     },
     
     /**
      * Hide connection info containers
      */
-    hideConnectionInfo() {
-        // Hide connection info
-        const connectionInfoContainer = document.getElementById('connection-info-container');
-        if (connectionInfoContainer) {
-            connectionInfoContainer.style.display = 'none';
+    hideConnectionInfo: function() {
+        if (this.elements.connectionInfoContainer) {
+            this.elements.connectionInfoContainer.style.display = 'none';
         }
         
-        // Hide answer info
-        const answerInfoContainer = document.getElementById('answer-info-container');
-        if (answerInfoContainer) {
-            answerInfoContainer.style.display = 'none';
+        if (this.elements.answerInfoContainer) {
+            this.elements.answerInfoContainer.style.display = 'none';
         }
+        
+        // Also remove by ID
+        const containers = [
+            document.getElementById('connection-info-container'),
+            document.getElementById('answer-info-container')
+        ];
+        
+        containers.forEach(container => {
+            if (container) container.style.display = 'none';
+        });
     },
     
     /**
      * Show manual connection input
      * @param {string} roomId Optional room ID to pre-fill
      */
-    showManualConnectionInput(roomId = '') {
-        // Show the manual connection modal
-        const manualConnectionModal = document.getElementById('manual-connection-ui');
-        if (manualConnectionModal) {
-            // Update input if provided
-            if (roomId) {
-                const friendIdInput = document.getElementById('friend-id');
-                if (friendIdInput) {
-                    friendIdInput.value = roomId;
-                }
-            }
-            
-            manualConnectionModal.style.display = 'flex';
-        } else {
-            // Fallback to direct connection if modal not found
-            if (roomId) {
-                this.connectToRoom(roomId);
+    showManualConnectionInput: function(roomId = '') {
+        // Create connection info modal
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.id = 'manual-connection-modal';
+        modal.style.display = 'flex';
+        
+        const content = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Manual Connection</h2>
+                </div>
+                <div class="modal-body">
+                    <p>Ask your friend to create a room and share their connection info with you:</p>
+                    
+                    <textarea id="manual-connection-input" rows="5" style="width:100%" 
+                        placeholder="Paste connection info here"></textarea>
+                </div>
+                <div class="modal-buttons">
+                    <button id="connect-manual-button" class="modal-button primary-button">Connect</button>
+                    <button id="close-manual-modal" class="modal-button secondary-button">Cancel</button>
+                </div>
+            </div>
+        `;
+        
+        modal.innerHTML = content;
+        document.body.appendChild(modal);
+        
+        // Add event listeners
+        document.getElementById('connect-manual-button').addEventListener('click', () => {
+            const input = document.getElementById('manual-connection-input').value.trim();
+            if (input) {
+                modal.style.display = 'none';
+                this.joinRoom(input);
             } else {
-                alert('Please enter a Room ID to connect.');
+                alert('Please paste connection information.');
             }
-        }
+        });
+        
+        document.getElementById('close-manual-modal').addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+        
+        // Close when clicking outside
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
     },
     
     /**
-     * Show invite modal
+     * Show connection troubleshooting guide
      */
-    showInviteModal() {
-        if (!this.roomId) {
-            alert('Please create a room first.');
-            return;
-        }
+    showTroubleshooting: function() {
+        // Get existing troubleshooting modal
+        let troubleshootingModal = document.getElementById('connectivity-guide');
         
-        const inviteModal = document.getElementById('invite-modal');
-        const inviteLink = document.getElementById('invite-link');
-        
-        if (inviteModal && inviteLink) {
-            // Set the invite link - use URL with room ID for simplicity
-            const url = new URL(window.location.href);
-            url.searchParams.set('room', this.roomId);
-            inviteLink.value = url.toString();
+        // If it doesn't exist, create it
+        if (!troubleshootingModal) {
+            troubleshootingModal = document.createElement('div');
+            troubleshootingModal.id = 'connectivity-guide';
+            troubleshootingModal.className = 'modal';
             
-            // Show the modal
-            inviteModal.style.display = 'flex';
+            const content = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Connection Troubleshooting</h2>
+                    </div>
+                    <div class="modal-body">
+                        <p>If you're having trouble connecting:</p>
+                        <ol>
+                            <li>Make sure both users are using modern browsers (Chrome, Firefox, Edge)</li>
+                            <li>Try refreshing the page and attempting the connection again</li>
+                            <li>Disable any VPNs or firewalls that might block WebRTC</li>
+                            <li>If you're behind a corporate network, it may block WebRTC connections</li>
+                            <li>Try connecting from a different network or using a mobile hotspot</li>
+                        </ol>
+                        
+                        <div class="webrtc-info">
+                            <p><i class="fas fa-info-circle"></i> This app uses WebRTC for direct peer-to-peer connections</p>
+                            <p>Some networks may require TURN servers for successful connections</p>
+                        </div>
+                    </div>
+                    <div class="modal-buttons">
+                        <button id="show-diagnostics" class="modal-button primary-button">Show Diagnostics</button>
+                        <button id="show-manual" class="modal-button primary-button">Try Manual Connection</button>
+                        <button id="close-guide" class="modal-button secondary-button">Close</button>
+                    </div>
+                </div>
+            `;
+            
+            troubleshootingModal.innerHTML = content;
+            document.body.appendChild(troubleshootingModal);
+            
+            // Add event listeners
+            document.getElementById('show-diagnostics').addEventListener('click', () => {
+                this.showDiagnostics();
+            });
+            
+            document.getElementById('show-manual').addEventListener('click', () => {
+                troubleshootingModal.style.display = 'none';
+                this.showManualConnectionInput();
+            });
+            
+            document.getElementById('close-guide').addEventListener('click', () => {
+                troubleshootingModal.style.display = 'none';
+            });
+            
+            // Close when clicking outside
+            troubleshootingModal.addEventListener('click', (e) => {
+                if (e.target === troubleshootingModal) {
+                    troubleshootingModal.style.display = 'none';
+                }
+            });
         }
+        
+        // Show the modal
+        troubleshootingModal.style.display = 'flex';
     },
     
     /**
-     * Show troubleshooting guide
+     * Show connection diagnostics
      */
-    showTroubleshooting() {
-        const troubleshootingModal = document.getElementById('connectivity-guide');
-        if (troubleshootingModal) {
-            troubleshootingModal.style.display = 'flex';
+    showDiagnostics: function() {
+        // Get diagnostic info
+        const diagnosticInfo = SimpleWebRTC.diagnosticInfo();
+        
+        // Create diagnostics modal
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.id = 'diagnostics-modal';
+        modal.style.display = 'flex';
+        
+        // Format network info
+        let networkInfoHtml = '';
+        if (diagnosticInfo.networkInfo !== 'N/A') {
+            networkInfoHtml = `
+                <tr><td>Connection Type:</td><td>${diagnosticInfo.networkInfo.type || 'unknown'}</td></tr>
+                <tr><td>Effective Type:</td><td>${diagnosticInfo.networkInfo.effectiveType || 'unknown'}</td></tr>
+                <tr><td>Downlink:</td><td>${diagnosticInfo.networkInfo.downlink || 'unknown'} Mbps</td></tr>
+                <tr><td>RTT:</td><td>${diagnosticInfo.networkInfo.rtt || 'unknown'} ms</td></tr>
+            `;
         }
+        
+        const content = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Connection Diagnostics</h2>
+                </div>
+                <div class="modal-body">
+                    <h3>Browser Information</h3>
+                    <table class="diagnostic-table">
+                        <tr><td>User Agent:</td><td>${diagnosticInfo.browserInfo}</td></tr>
+                        <tr><td>WebRTC Support:</td><td>${diagnosticInfo.webrtcSupport ? 'Yes' : 'No'}</td></tr>
+                    </table>
+                    
+                    <h3>Connection State</h3>
+                    <table class="diagnostic-table">
+                        <tr><td>Connection State:</td><td>${diagnosticInfo.connectionState}</td></tr>
+                        <tr><td>ICE Connection State:</td><td>${diagnosticInfo.iceConnectionState}</td></tr>
+                        <tr><td>ICE Gathering State:</td><td>${diagnosticInfo.iceGatheringState}</td></tr>
+                        <tr><td>Signalling State:</td><td>${diagnosticInfo.signallingState}</td></tr>
+                        <tr><td>Data Channel State:</td><td>${diagnosticInfo.dataChannelState}</td></tr>
+                        <tr><td>ICE Candidates Gathered:</td><td>${diagnosticInfo.candidatesGathered}</td></tr>
+                    </table>
+                    
+                    <h3>Network Information</h3>
+                    <table class="diagnostic-table">
+                        ${networkInfoHtml}
+                    </table>
+                    
+                    <p style="margin-top: 20px;"><strong>Tip:</strong> Copy this information when reporting connection issues.</p>
+                </div>
+                <div class="modal-buttons">
+                    <button id="copy-diagnostics" class="modal-button primary-button">Copy Info</button>
+                    <button id="close-diagnostics" class="modal-button secondary-button">Close</button>
+                </div>
+            </div>
+        `;
+        
+        modal.innerHTML = content;
+        document.body.appendChild(modal);
+        
+        // Add CSS for diagnostics table
+        const style = document.createElement('style');
+        style.textContent = `
+            .diagnostic-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 10px;
+            }
+            .diagnostic-table td {
+                padding: 4px 8px;
+                border-bottom: 1px solid #eee;
+            }
+            .diagnostic-table tr td:first-child {
+                font-weight: bold;
+                width: 40%;
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // Add event listeners
+        document.getElementById('copy-diagnostics').addEventListener('click', () => {
+            const diagnosticText = JSON.stringify(diagnosticInfo, null, 2);
+            this.copyToClipboard(diagnosticText);
+            alert('Diagnostic information copied to clipboard!');
+        });
+        
+        document.getElementById('close-diagnostics').addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+        
+        // Close when clicking outside
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
     },
     
     /**
      * Add a chat message
-     * @param {string} senderId Sender ID
+     * @param {string} senderId Sender ID or 'system'
      * @param {string} text Message text
      */
-    addChatMessage(senderId, text) {
+    addChatMessage: function(senderId, text) {
         const chatMessages = document.getElementById('chat-messages');
         if (!chatMessages) return;
         
@@ -804,7 +956,7 @@ const ConnectionManager = {
      * Send a chat message
      * @param {string} text Message text
      */
-    sendChatMessage(text) {
+    sendChatMessage: function(text) {
         if (!text.trim()) return;
         
         // Add message to local chat
@@ -813,7 +965,7 @@ const ConnectionManager = {
         // Send to peer
         this.sendData({
             type: 'chat_message',
-            text: text
+            message: text
         });
     },
     
@@ -823,7 +975,7 @@ const ConnectionManager = {
      * @param {string} message Notification message
      * @param {string} type Notification type (info, success, warning, error)
      */
-    showNotification(title, message, type = 'info') {
+    showNotification: function(title, message, type = 'info') {
         // Create notification container if it doesn't exist
         let container = document.getElementById('notification-container');
         if (!container) {
@@ -875,7 +1027,7 @@ const ConnectionManager = {
      * Copy text to clipboard
      * @param {string} text Text to copy
      */
-    copyToClipboard(text) {
+    copyToClipboard: function(text) {
         // Create a temporary input element
         const input = document.createElement('textarea');
         input.style.position = 'fixed';
@@ -892,49 +1044,9 @@ const ConnectionManager = {
     },
     
     /**
-     * Share text via Web Share API or fallback to clipboard
-     * @param {string} title Share title
-     * @param {string} text Descriptive text
-     * @param {string} data Data to share
-     */
-    shareText(title, text, data) {
-        // Try to use Web Share API if available
-        if (navigator.share) {
-            navigator.share({
-                title: title,
-                text: text + '\n\n' + data
-            }).catch(() => {
-                // Fallback to clipboard
-                this.copyToClipboard(data);
-                alert('Connection info copied to clipboard. Please paste it to the other player.');
-            });
-        } else {
-            // Fallback to clipboard
-            this.copyToClipboard(data);
-            alert('Connection info copied to clipboard. Please paste it to the other player.');
-        }
-    },
-    
-    /**
-     * Load a script dynamically
-     * @param {string} src Script source URL
-     * @param {Function} callback Callback function when loaded
-     */
-    loadScript(src, callback) {
-        const script = document.createElement('script');
-        script.src = src;
-        script.onload = callback;
-        script.onerror = () => {
-            console.error(`Failed to load script: ${src}`);
-            alert(`Failed to load required script: ${src}. Please check your internet connection and try again.`);
-        };
-        document.head.appendChild(script);
-    },
-    
-    /**
      * Play notification sound for new messages
      */
-    playNotificationSound() {
+    playNotificationSound: function() {
         try {
             // Create audio context
             const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -963,40 +1075,52 @@ const ConnectionManager = {
     
     /**
      * Get a random color
-     * @returns {string} Random color in hex format
+     * @returns {string} Random color
      */
-    getRandomColor() {
+    getRandomColor: function() {
         const hue = Math.floor(Math.random() * 360);
         return `hsl(${hue}, 70%, 60%)`;
     },
     
     /**
-     * Escape HTML to prevent XSS in chat
+     * Escape HTML to prevent XSS
      * @param {string} text Text to escape
      * @returns {string} Escaped text
      */
-    escapeHtml(text) {
+    escapeHtml: function(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     },
     
     /**
-     * Select a game
-     * @param {string} gameType Game type to select
+     * Load a script dynamically
+     * @param {string} src Script URL
+     * @param {Function} callback Optional callback when loaded
      */
-    selectGame(gameType) {
-        // Find game module
-        if (window.GameModules && window.GameModules[gameType]) {
-            this.gameModule = window.GameModules[gameType];
-            this.gameModule.init();
-        } else {
-            console.warn(`Game module not found: ${gameType}`);
+    loadScript: function(src, callback) {
+        // Check if script is already loaded
+        if (document.querySelector(`script[src="${src}"]`)) {
+            if (callback) callback();
+            return;
         }
+        
+        const script = document.createElement('script');
+        script.src = src;
+        
+        if (callback) {
+            script.onload = callback;
+        }
+        
+        script.onerror = () => {
+            console.error(`Failed to load script: ${src}`);
+        };
+        
+        document.head.appendChild(script);
     }
 };
 
-// Create notification container
+// Initialize the connection manager when page loads
 document.addEventListener('DOMContentLoaded', function() {
     // Create notification container if it doesn't exist
     if (!document.getElementById('notification-container')) {
@@ -1041,358 +1165,42 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-});
-
-// Expose globally
-window.ConnectionManager = ConnectionManager;
-/**
- * Connection Manager for Mentalplayer
- * Integrates SimpleWebRTC with the main application
- */
-
-const ConnectionManager = {
-    // State
-    webrtc: null,
-    playerName: '',
-    playerId: '',
-    isRoomCreator: false,
-    roomId: '',
-    players: {},
-    gameModule: null,
-    
-    // UI Elements
-    elements: {
-        connectionStatus: document.getElementById('connection-status'),
-        playerDisplay: document.getElementById('player-display'),
-        roomInfo: document.getElementById('room-info'),
-        currentRoomId: document.getElementById('current-room-id'),
-        playersContainer: document.getElementById('players-container'),
-        myConnectionId: document.getElementById('my-connection-id'),
-        manualConnectionContainer: null,
-        answerInputContainer: null
-    },
-    
-    /**
-     * Initialize the connection manager
-     * @param {Object} options Configuration options
-     */
-    init: function(options = {}) {
-        console.log('Initializing Connection Manager...');
-        
-        // Load SimpleWebRTC if not already available
-        if (typeof SimpleWebRTC === 'undefined') {
-            this.loadScript('./webrtc.js', () => {
-                this.continueInit(options);
-            });
-        } else {
-            this.continueInit(options);
-        }
-    },
-    
-    /**
-     * Continue initialization after ensuring SimpleWebRTC is loaded
-     * @param {Object} options Configuration options
-     */
-    continueInit: function(options) {
-        // Set player info
-        this.playerName = options.playerName || localStorage.getItem('playerName') || 'Player';
-        this.elements.playerDisplay.textContent = this.playerName;
-        
-        // Update UI elements if they've changed
-        this.updateUIElements();
-        
-        // Initialize WebRTC
-        this.webrtc = SimpleWebRTC;
-        this.playerId = this.webrtc.init({
-            callbacks: {
-                onConnected: () => this.handleConnected(),
-                onDisconnected: () => this.handleDisconnected(),
-                onMessage: (message) => this.handleMessage(message),
-                onError: (message, error) => this.handleError(message, error),
-                onStatusChange: (status, message) => this.updateConnectionStatus(status, message)
+});Invalid connection information');
             }
-        });
-        
-        // Update connection ID display
-        if (this.elements.myConnectionId) {
-            this.elements.myConnectionId.textContent = this.playerId;
-        }
-        
-        // Set up event listeners
-        this.setupEventListeners();
-        
-        console.log('Connection Manager initialized with ID:', this.playerId);
-    },
-    
-    /**
-     * Update UI element references
-     * This ensures we have the latest elements if they've been recreated
-     */
-    updateUIElements: function() {
-        // Update basic elements
-        this.elements.connectionStatus = document.getElementById('connection-status') || this.elements.connectionStatus;
-        this.elements.playerDisplay = document.getElementById('player-display') || this.elements.playerDisplay;
-        this.elements.roomInfo = document.getElementById('room-info') || this.elements.roomInfo;
-        this.elements.currentRoomId = document.getElementById('current-room-id') || this.elements.currentRoomId;
-        this.elements.playersContainer = document.getElementById('players-container') || this.elements.playersContainer;
-        this.elements.myConnectionId = document.getElementById('my-connection-id') || this.elements.myConnectionId;
-    },
-    
-    /**
-     * Set up event listeners for connection-related elements
-     */
-    setupEventListeners: function() {
-        // Find elements
-        const createRoomButton = document.getElementById('create-room');
-        const joinRoomButton = document.getElementById('join-room');
-        const roomIdInput = document.getElementById('room-id');
-        const invitePlayersButton = document.getElementById('invite-players');
-        const copyMyIdButton = document.getElementById('copy-my-id');
-        const connectToFriendButton = document.getElementById('connect-to-friend');
-        const friendIdInput = document.getElementById('friend-id');
-        
-        // Create room button
-        if (createRoomButton) {
-            createRoomButton.addEventListener('click', () => this.createRoom());
-        }
-        
-        // Join room button
-        if (joinRoomButton) {
-            joinRoomButton.addEventListener('click', () => {
-                const roomId = roomIdInput ? roomIdInput.value.trim() : '';
-                if (roomId) {
-                    this.joinRoom(roomId);
+            
+            // Handle offer (join as responder)
+            if (connectionInfo.type === 'offer' || connectionInfo.offer) {
+                this.isRoomCreator = false;
+                this.roomId = connectionInfo.initiatorId;
+                
+                // Update UI
+                this.updateRoomInfo();
+                
+                // Join the connection
+                this.updateConnectionStatus('connecting', 'Joining room...');
+                const answerInfo = await SimpleWebRTC.joinConnection(connectionInfo);
+                
+                if (answerInfo) {
+                    // Show answer for sharing back to initiator
+                    this.showAnswerInfo(answerInfo);
                 } else {
-                    this.showManualConnectionInput();
+                    throw new Error('Failed to create answer');
                 }
-            });
-        }
-        
-        // Invite players button
-        if (invitePlayersButton) {
-            invitePlayersButton.addEventListener('click', () => this.showInviteModal());
-        }
-        
-        // Copy my ID button
-        if (copyMyIdButton) {
-            copyMyIdButton.addEventListener('click', () => {
-                this.copyToClipboard(this.playerId);
-                copyMyIdButton.textContent = 'Copied!';
-                setTimeout(() => {
-                    copyMyIdButton.innerHTML = '<i class="fas fa-copy"></i> Copy';
-                }, 2000);
-            });
-        }
-        
-        // Connect to friend button
-        if (connectToFriendButton && friendIdInput) {
-            connectToFriendButton.addEventListener('click', () => {
-                const friendId = friendIdInput.value.trim();
-                if (friendId) {
-                    this.joinRoom(friendId);
+            }
+            // Handle answer (as initiator)
+            else if (connectionInfo.type === 'answer' || connectionInfo.answer) {
+                if (!this.isRoomCreator) {
+                    throw new Error('Cannot process answer: not a room creator');
+                }
+                
+                // Process the answer
+                const result = await SimpleWebRTC.processAnswer(connectionInfo);
+                
+                if (result) {
+                    this.updateConnectionStatus('connecting', 'Finalizing connection...');
+                    // Hide connection info container
+                    if (this.elements.connectionInfoContainer) {
+                        this.elements.connectionInfoContainer.style.display = 'none';
+                    }
                 } else {
-                    alert('Please enter your friend\'s ID');
-                }
-            });
-        }
-    },
-    
-    /**
-     * Create a new room as initiator
-     */
-    async createRoom: function() {
-        // Ensure a game is selected
-        if (!this.gameModule) {
-            alert('Please select a game first.');
-            return;
-        }
-        
-        // Check if already in a room
-        if (this.roomId) {
-            if (!confirm('You are already in a room. Would you like to leave and create a new one?')) {
-                return;
-            }
-            
-            // Leave current room
-            this.leaveRoom();
-        }
-        
-        // Set as room creator
-        this.isRoomCreator = true;
-        this.roomId = this.playerId; // Use player ID as room ID
-        
-        // Update UI
-        this.updateRoomInfo();
-        
-        // Create WebRTC connection
-        this.updateConnectionStatus('connecting', 'Creating room...');
-        const connectionInfo = await this.webrtc.createConnection();
-        
-        if (connectionInfo) {
-            // Show connection info for manual sharing
-            this.showConnectionInfo(connectionInfo);
-        } else {
-            this.updateConnectionStatus('error', 'Failed to create room');
-            alert('Failed to create room. Please try again.');
-        }
-    },
-    
-    /**
-     * Join an existing room as responder
-     * @param {string} roomId Room ID to join
-     */
-    async joinRoom: function(roomId) {
-        if (!roomId) return;
-        
-        // Check if trying to join own room
-        if (roomId === this.playerId) {
-            alert('You cannot join your own room this way.');
-            return;
-        }
-        
-        // Check if already in a room
-        if (this.roomId) {
-            if (!confirm('You are already in a room. Would you like to leave and join a new one?')) {
-                return;
-            }
-            
-            // Leave current room
-            this.leaveRoom();
-        }
-        
-        // Try to join as a direct ID first
-        this.updateConnectionStatus('connecting', 'Joining room...');
-        
-        // If it looks like a connection info object, parse it
-        if (roomId.length > 20 && (roomId.includes('{') || roomId.includes('['))) {
-            try {
-                const connectionInfo = JSON.parse(roomId);
-                await this.processConnectionInfo(connectionInfo);
-                return;
-            } catch (e) {
-                console.log('Not a valid connection info object, trying as room ID');
-            }
-        }
-        
-        // Otherwise, show manual connection input
-        this.showManualConnectionInput(roomId);
-    },
-    
-    /**
-     * Process connection info object
-     * @param {Object} connectionInfo Connection information
-     */
-    async processConnectionInfo: function(connectionInfo) {
-        if (!connectionInfo || !connectionInfo.type) {
-            alert('Invalid connection information. Please try again.');
-            return;
-        }
-        
-        if (connectionInfo.type === 'offer') {
-            // Process as an offer (join as responder)
-            this.isRoomCreator = false;
-            this.roomId = connectionInfo.initiatorId;
-            
-            // Update UI
-            this.updateRoomInfo();
-            
-            // Join WebRTC connection
-            const answerInfo = await this.webrtc.joinConnection(connectionInfo);
-            
-            if (answerInfo) {
-                // Show answer info for manual sharing
-                this.showAnswerInfo(answerInfo);
-            } else {
-                this.updateConnectionStatus('error', 'Failed to join room');
-                alert('Failed to join room. Please try again.');
-            }
-        } else if (connectionInfo.type === 'answer') {
-            // Process as an answer (as initiator)
-            if (!this.isRoomCreator) {
-                alert('Cannot process answer: not a room creator');
-                return;
-            }
-            
-            const result = await this.webrtc.processAnswer(connectionInfo);
-            
-            if (result) {
-                this.updateConnectionStatus('connecting', 'Connection in progress...');
-            } else {
-                this.updateConnectionStatus('error', 'Failed to process answer');
-                alert('Failed to process answer. Please try again.');
-            }
-        } else {
-            alert('Unknown connection information type');
-        }
-    },
-    
-    /**
-     * Leave the current room
-     */
-    leaveRoom: function() {
-        // Disconnect WebRTC
-        if (this.webrtc) {
-            this.webrtc.disconnect();
-        }
-        
-        // Reset state
-        this.isRoomCreator = false;
-        this.roomId = '';
-        this.players = {};
-        
-        // Update UI
-        if (this.elements.roomInfo) {
-            this.elements.roomInfo.style.display = 'none';
-        }
-        
-        // Update players list
-        this.updatePlayersList();
-        
-        // Update connection status
-        this.updateConnectionStatus('disconnected', 'Left room');
-    },
-    
-    /**
-     * Send data to connected peer
-     * @param {Object} data Data to send
-     * @returns {boolean} Success status
-     */
-    sendData: function(data) {
-        if (!this.webrtc || !data) return false;
-        
-        return this.webrtc.sendData(data);
-    },
-    
-    /**
-     * Handle successful connection
-     */
-    handleConnected: function() {
-        console.log('Connection established!');
-        
-        // Add self to players list
-        this.players[this.playerId] = {
-            name: this.playerName,
-            id: this.playerId,
-            color: this.getRandomColor()
-        };
-        
-        // Send player info
-        this.sendData({
-            type: 'player_info',
-            name: this.playerName,
-            id: this.playerId,
-            gameType: this.gameModule ? this.gameModule.type : null
-        });
-        
-        // Update players list
-        this.updatePlayersList();
-        
-        // Hide connection info
-        this.hideConnectionInfo();
-        
-        // Show success notification
-        this.showNotification('Connected!', 'Connection established successfully.', 'success');
-    },
-    
-    /**
-     * Handle disconnection
+                    throw new Error('

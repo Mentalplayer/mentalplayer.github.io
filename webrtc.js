@@ -11,7 +11,18 @@ const SimpleWebRTC = {
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' }
+            { urls: 'stun:stun3.l.google.com:19302' },
+            // Add these free TURN servers for testing
+            {
+                urls: 'turn:openrelay.metered.ca:80',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            },
+            {
+                urls: 'turn:openrelay.metered.ca:443',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            }
         ],
         iceCandidatePoolSize: 10
     },
@@ -29,7 +40,9 @@ const SimpleWebRTC = {
         connection: null,
         channel: null,
         retryCount: 0,
-        maxRetries: 3
+        maxRetries: 3,
+        signalConnected: false,
+        pendingCandidates: []
     },
     
     // Event callbacks
@@ -38,7 +51,8 @@ const SimpleWebRTC = {
         onDisconnected: null,
         onMessage: null,
         onError: null,
-        onStatusChange: null
+        onStatusChange: null,
+        onNewIceCandidate: null  // New callback for trickle ICE
     },
     
     /**
@@ -220,6 +234,52 @@ const SimpleWebRTC = {
     },
     
     /**
+     * Add an ICE candidate received from peer
+     * @param {Object} candidate ICE candidate
+     */
+    addRemoteIceCandidate: async function(candidate) {
+        try {
+            if (!this.state.connection) {
+                // Queue the candidate to be added when connection is created
+                this.state.pendingCandidates.push(candidate);
+                return false;
+            }
+            
+            // Check if remote description is set
+            if (this.state.connection.remoteDescription) {
+                await this.state.connection.addIceCandidate(new RTCIceCandidate(candidate));
+                return true;
+            } else {
+                // Queue the candidate to be added when remote description is set
+                this.state.pendingCandidates.push(candidate);
+                return false;
+            }
+        } catch (error) {
+            console.error('Error adding remote ICE candidate:', error);
+            return false;
+        }
+    },
+    
+    /**
+     * Process any pending ICE candidates
+     */
+    processPendingCandidates: async function() {
+        if (this.state.pendingCandidates.length === 0 || !this.state.connection) return;
+        
+        // Process any pending candidates
+        for (const candidate of this.state.pendingCandidates) {
+            try {
+                await this.state.connection.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (e) {
+                console.warn('Error adding pending ICE candidate:', e);
+            }
+        }
+        
+        // Clear pending candidates
+        this.state.pendingCandidates = [];
+    },
+    
+    /**
      * Send data through the connection
      * @param {Object} data Data to send
      */
@@ -273,6 +333,11 @@ const SimpleWebRTC = {
             if (event.candidate) {
                 console.log('New ICE candidate:', event.candidate);
                 this.state.localCandidates.push(event.candidate);
+                
+                // Notify for trickle ICE if callback is set
+                if (this.callbacks.onNewIceCandidate) {
+                    this.callbacks.onNewIceCandidate(event.candidate);
+                }
             } else {
                 console.log('ICE candidate gathering complete');
             }
@@ -358,11 +423,21 @@ const SimpleWebRTC = {
      * @param {RTCDataChannel} channel Data channel
      */
     setupChannelHandlers: function(channel) {
+        console.log('Setting up data channel handlers for', channel.label);
+        
+        channel.binaryType = 'arraybuffer';  // Optimize for binary data if needed
+        
         channel.onopen = () => {
-            console.log('Data channel open');
+            console.log('Data channel open:', channel.label);
             this.state.isConnected = true;
             this.state.isConnecting = false;
             this.updateStatus('connected', 'Data channel open');
+            
+            // Send an initial ping to confirm connection
+            this.sendData({
+                type: 'ping',
+                timestamp: Date.now()
+            });
             
             if (this.callbacks.onConnected) {
                 this.callbacks.onConnected();
@@ -403,34 +478,33 @@ const SimpleWebRTC = {
      */
     waitForIceCandidates: function() {
         return new Promise((resolve) => {
-            // Check if gathering is already complete
-            if (this.state.connection.iceGatheringState === 'complete') {
-                resolve({
-                    description: this.state.connection.localDescription,
-                    candidates: this.state.localCandidates
-                });
-                return;
-            }
+            const candidates = [];
+            let iceGatheringTimeout;
             
-            // Set a timeout for ICE gathering (5 seconds)
-            const iceTimeout = setTimeout(() => {
-                console.log('ICE gathering timed out, using available candidates');
-                resolve({
-                    description: this.state.connection.localDescription,
-                    candidates: this.state.localCandidates
-                });
-            }, 5000);
-            
-            // Listen for gathering state change
-            this.state.connection.onicegatheringstatechange = () => {
+            const checkComplete = () => {
                 if (this.state.connection.iceGatheringState === 'complete') {
-                    clearTimeout(iceTimeout);
+                    clearTimeout(iceGatheringTimeout);
                     resolve({
                         description: this.state.connection.localDescription,
                         candidates: this.state.localCandidates
                     });
                 }
             };
+            
+            // Set a longer timeout (10 seconds)
+            iceGatheringTimeout = setTimeout(() => {
+                console.log('ICE gathering timed out, using available candidates:', this.state.localCandidates.length);
+                resolve({
+                    description: this.state.connection.localDescription,
+                    candidates: this.state.localCandidates
+                });
+            }, 10000);
+            
+            // Also check current state
+            this.state.connection.onicegatheringstatechange = checkComplete;
+            
+            // Check immediately in case gathering is already complete
+            checkComplete();
         });
     },
     
@@ -464,6 +538,7 @@ const SimpleWebRTC = {
         this.state.localCandidates = [];
         this.state.offerCreated = false;
         this.state.answerReceived = false;
+        this.state.pendingCandidates = [];
     },
     
     /**
@@ -514,6 +589,29 @@ const SimpleWebRTC = {
         if (this.callbacks.onStatusChange) {
             this.callbacks.onStatusChange(status, message);
         }
+    },
+    
+    /**
+     * Get diagnostic information about the connection
+     * @returns {Object} Diagnostic information
+     */
+    diagnosticInfo: function() {
+        return {
+            browserInfo: navigator.userAgent,
+            webrtcSupport: !!window.RTCPeerConnection,
+            iceGatheringState: this.state.connection ? this.state.connection.iceGatheringState : 'N/A',
+            connectionState: this.state.connection ? this.state.connection.connectionState : 'N/A',
+            iceConnectionState: this.state.connection ? this.state.connection.iceConnectionState : 'N/A',
+            signallingState: this.state.connection ? this.state.connection.signalingState : 'N/A',
+            candidatesGathered: this.state.localCandidates.length,
+            dataChannelState: this.state.channel ? this.state.channel.readyState : 'N/A',
+            networkInfo: navigator.connection ? {
+                type: navigator.connection.type,
+                effectiveType: navigator.connection.effectiveType,
+                downlink: navigator.connection.downlink,
+                rtt: navigator.connection.rtt
+            } : 'N/A'
+        };
     }
 };
 
