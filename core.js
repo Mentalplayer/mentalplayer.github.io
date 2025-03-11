@@ -268,13 +268,23 @@ const MentalPlayer = (() => {
             });
         }
         
-        // Click outside modals to close
+        // Click outside modals to close - with special handling for the entry modal
         window.addEventListener('click', event => {
             if (event.target.classList.contains('modal')) {
-                // Only allow clicking outside for non-essential modals
+                // Don't allow clicking outside for name entry modal
                 const modalId = event.target.id;
-                if (modalId !== 'entry-modal') {  // Prevent closing the name entry modal
+                if (modalId !== 'entry-modal') {
+                    // Only non-essential modals can be closed by clicking outside
                     event.target.style.display = 'none';
+                } else {
+                    // Add a subtle shake effect to indicate the modal can't be dismissed
+                    const modalContent = document.querySelector('#entry-modal .modal-content');
+                    if (modalContent) {
+                        modalContent.classList.add('shake-effect');
+                        setTimeout(() => {
+                            modalContent.classList.remove('shake-effect');
+                        }, 500);
+                    }
                 }
             }
         });
@@ -757,6 +767,8 @@ const MentalPlayer = (() => {
             return;
         }
         
+        console.log('[MentalPlayer] Sending chat message:', message);
+        
         // Send message via connection manager
         if (window.ConnectionManager && typeof window.ConnectionManager.sendData === 'function') {
             window.ConnectionManager.sendData({
@@ -764,7 +776,7 @@ const MentalPlayer = (() => {
                 message: message
             });
             
-            // Add to local chat
+            // Add to local chat immediately (this is important)
             addChatMessage(state.user.id, state.user.name, message);
             
             // Clear input
@@ -780,6 +792,8 @@ const MentalPlayer = (() => {
      */
     function addChatMessage(userId, userName, message) {
         if (!elements.chatMessages) return;
+        
+        console.log(`[MentalPlayer] Adding chat message from ${userName}(${userId}): ${message}`);
         
         // Create message element
         const messageEl = document.createElement('div');
@@ -821,6 +835,8 @@ const MentalPlayer = (() => {
      * @param {Object} connectionState New connection state
      */
     function connectionStateChanged(connectionState) {
+        console.log('[MentalPlayer] Connection state changed:', connectionState);
+        
         // Update local state
         state.connection.status = connectionState.status;
         state.connection.roomId = connectionState.roomId;
@@ -876,6 +892,8 @@ const MentalPlayer = (() => {
     function updatePlayersList() {
         if (!elements.playersContainer) return;
         
+        console.log('[MentalPlayer] Updating players list:', state.connection.peers);
+        
         // Clear existing players
         elements.playersContainer.innerHTML = '';
         
@@ -897,6 +915,9 @@ const MentalPlayer = (() => {
         
         // Add peers
         Object.values(state.connection.peers).forEach(peer => {
+            // Skip self (avoid duplicates)
+            if (peer.id === state.user.id) return;
+            
             const peerEl = document.createElement('div');
             peerEl.className = 'player';
             peerEl.innerHTML = `
@@ -1085,6 +1106,8 @@ const MentalPlayer = (() => {
      * @param {Object} data Message data
      */
     function handleGameMessage(peerId, data) {
+        console.log(`[MentalPlayer] Received game message from ${peerId}:`, data);
+        
         // Route message to active game if available
         if (state.activeGame.instance && typeof state.activeGame.instance.handleMessage === 'function') {
             state.activeGame.instance.handleMessage(peerId, data);
@@ -1101,7 +1124,12 @@ const MentalPlayer = (() => {
         shareViaWhatsApp,
         shareViaEmail,
         shareViaFacebook,
-        shareViaTwitter
+        shareViaTwitter,
+        
+        // Provide access to active game for connection manager
+        get activeGame() {
+            return state.activeGame;
+        }
     };
 })();
 

@@ -231,6 +231,14 @@ const ConnectionManager = (() => {
         state.roomId = state.userId;
         state.isHost = true;
         
+        // Add ourselves to the peers list
+        state.peers[state.userId] = {
+            id: state.userId,
+            name: state.userName,
+            isHost: true,
+            color: getColorForUser(state.userId)
+        };
+        
         log(`Created room with ID: ${state.roomId}`);
         
         // Update status
@@ -276,6 +284,14 @@ const ConnectionManager = (() => {
         state.roomId = roomId;
         state.isHost = false;
         state.connectionAttempts = 0;
+        
+        // Add ourselves to the peers list
+        state.peers[state.userId] = {
+            id: state.userId,
+            name: state.userName,
+            isHost: false,
+            color: getColorForUser(state.userId)
+        };
         
         // Update status
         updateStatus('connecting', 'Connecting to room...');
@@ -379,23 +395,23 @@ const ConnectionManager = (() => {
      */
     function handleIncomingConnection(connection) {
         const peerId = connection.peer;
-    
+        
         log(`Processing incoming connection from peer: ${peerId}`);
-    
+        
         // Set up connection event handlers
         setupConnectionEventListeners(connection);
-    
+        
         // When the connection is open, we'll set up the peer in our system
         connection.on('open', () => {
             log(`Connection fully established with peer: ${peerId}`);
-        
+            
             // Add to active connections
             state.activeConnections[peerId] = connection;
-        
+            
             // If we're the host, send a welcome message and current state
             if (state.isHost) {
                 log(`Sending welcome data to peer: ${peerId}`);
-            
+                
                 // First add ourselves to the peer list if not already there
                 if (!state.peers[state.userId]) {
                     state.peers[state.userId] = {
@@ -405,20 +421,20 @@ const ConnectionManager = (() => {
                         color: getColorForUser(state.userId)
                     };
                 }
-            
+                
                 // Send the complete peer list to the new peer
                 sendToPeer(peerId, {
                     type: 'peer_list',
                     peers: state.peers
                 });
-            
+                
                 // Notify all other peers about the new connection
                 broadcastToPeers({
                     type: 'peer_joined',
                     peerId: peerId,
                     userName: state.peers[peerId] ? state.peers[peerId].name : 'Unknown User'
                 }, [peerId]); // Exclude the new peer from this broadcast
-            
+                
                 // If we have a current game state, send it after a short delay
                 // to ensure the peer has processed previous messages
                 setTimeout(() => {
@@ -429,7 +445,7 @@ const ConnectionManager = (() => {
                             state: state.gameState
                         });
                     }
-                
+                    
                     // Also ask the active game to send its state if available
                     if (window.MentalPlayer && 
                         window.MentalPlayer.activeGame && 
@@ -439,36 +455,35 @@ const ConnectionManager = (() => {
                         window.MentalPlayer.activeGame.instance.sendGameState();
                     }
                 }, 1000); // Short delay for connection stabilization
-            
+                
                 // Add welcome message to chat
                 if (window.MentalPlayer && window.MentalPlayer.addChatMessage) {
                     const peerName = state.peers[peerId] ? state.peers[peerId].name : 'New player';
                     window.MentalPlayer.addChatMessage('system', '', `${peerName} has joined the room.`);
                 }
             }
-        
+            
             // Start heartbeat for this connection
             startPeerHeartbeat(peerId);
         });
-    }
-
-    // Handle errors specifically for this connection
-    connection.on('error', (err) => {
-        log(`Error with peer ${peerId} connection: ${err.message}`, 'error');
-        // If this is a critical connection (e.g., host for non-host peer), handle accordingly
-        if (!state.isHost && peerId === state.roomId) {
-            updateStatus('error', 'Lost connection to host');
-            // Show notification
-            if (window.MentalPlayer && window.MentalPlayer.showNotification) {
-                window.MentalPlayer.showNotification(
-                    'Connection Error',
-                    'Lost connection to the game host. You may need to rejoin the room.',
-                    'error'
-                );
+        
+        // Handle errors specifically for this connection
+        connection.on('error', (err) => {
+            log(`Error with peer ${peerId} connection: ${err.message}`, 'error');
+            // If this is a critical connection (e.g., host for non-host peer), handle accordingly
+            if (!state.isHost && peerId === state.roomId) {
+                updateStatus('error', 'Lost connection to host');
+                // Show notification
+                if (window.MentalPlayer && window.MentalPlayer.showNotification) {
+                    window.MentalPlayer.showNotification(
+                        'Connection Error',
+                        'Lost connection to the game host. You may need to rejoin the room.',
+                        'error'
+                    );
+                }
             }
-        }
-    });
-}
+        });
+    }
     
     /**
      * Set up event listeners for a peer connection
@@ -502,38 +517,53 @@ const ConnectionManager = (() => {
                 color: getColorForUser(state.userId)
             });
             
+            // If we're the host, update internal host information first
+            if (state.isHost && !state.peers[state.userId]) {
+                // Add ourselves to the peer list
+                state.peers[state.userId] = {
+                    id: state.userId,
+                    name: state.userName,
+                    isHost: true,
+                    color: getColorForUser(state.userId)
+                };
+                
+                // Notify state change for local UI updates
+                notifyStateChange();
+            }
+            
             // If we're the host, send the current peer list to the new peer
             if (state.isHost) {
-                // First add ourselves to the peer list
-                if (!state.peers[state.userId]) {
-                    state.peers[state.userId] = {
-                        id: state.userId,
-                        name: state.userName,
-                        isHost: true,
-                        color: getColorForUser(state.userId)
-                    };
-                }
-                
-                // Send the complete peer list
-                sendToPeer(peerId, {
-                    type: 'peer_list',
-                    peers: state.peers
-                });
-                
-                // Notify all peers about the new connection
-                broadcastToPeers({
-                    type: 'peer_joined',
-                    peerId: peerId,
-                    userName: state.peers[peerId] ? state.peers[peerId].name : 'Unknown User'
-                }, [peerId]); // Exclude the new peer from this broadcast
-                
-                // Send current game state if available
-                if (state.gameState) {
+                // Send the complete peer list after a short delay
+                // to ensure the peer's peer_info is processed first
+                setTimeout(() => {
                     sendToPeer(peerId, {
-                        type: 'game_state',
-                        state: state.gameState
+                        type: 'peer_list',
+                        peers: state.peers
                     });
-                }
+                    
+                    // Notify all peers about the new connection
+                    broadcastToPeers({
+                        type: 'peer_joined',
+                        peerId: peerId,
+                        userName: state.peers[peerId] ? state.peers[peerId].name : 'Unknown User'
+                    }, [peerId]); // Exclude the new peer from this broadcast
+                    
+                    // Send current game state if available
+                    if (state.gameState) {
+                        sendToPeer(peerId, {
+                            type: 'game_state',
+                            state: state.gameState
+                        });
+                    }
+                    
+                    // Request the active game to send its state
+                    if (window.MentalPlayer && 
+                        window.MentalPlayer.activeGame && 
+                        window.MentalPlayer.activeGame.instance && 
+                        typeof window.MentalPlayer.activeGame.instance.sendGameState === 'function') {
+                        window.MentalPlayer.activeGame.instance.sendGameState();
+                    }
+                }, 500); // Short delay
             }
             
             // Start heartbeat for this connection
@@ -623,42 +653,6 @@ const ConnectionManager = (() => {
      */
     function handlePeerMessage(peerId, data) {
         if (!data || !data.type) return;
-
-        // Add debug logging to trace message flow
-        console.log(`[ConnectionManager] Handling message of type ${data.type} from peer ${peerId}`);
-    
-        // For game data messages, ensure they're properly forwarded to all peers
-        if (data.type === 'game_data') {
-            // If we're the host, forward the message to all other peers
-            if (state.isHost) {
-                console.log(`[ConnectionManager] Forwarding game data to all peers except ${peerId}`);
-                broadcastToPeers(data, [peerId]); // Exclude the sender
-            }
-        
-            // Make sure we're calling the game message handler
-            if (window.MentalPlayer && window.MentalPlayer.handleGameMessage) {
-                window.MentalPlayer.handleGameMessage(peerId, data);
-            }
-        }
-    
-        // For chat messages, ensure they're properly forwarded
-        if (data.type === 'chat_message') {
-            // Add the message to local chat
-            if (window.MentalPlayer && window.MentalPlayer.addChatMessage) {
-                const peerName = state.peers[peerId] ? state.peers[peerId].name : 'Unknown User';
-                window.MentalPlayer.addChatMessage(peerId, peerName, data.message);
-            }
-        
-            // If we're the host, forward message to all other peers
-            if (state.isHost) {
-                console.log(`[ConnectionManager] Forwarding chat message to all peers except ${peerId}`);
-                broadcastToPeers({
-                    type: 'chat_message',
-                    peerId: peerId,
-                    message: data.message
-                }, [peerId]); // Exclude sender
-            }
-        }
         
         // Skip logging heartbeat messages to avoid noise
         if (data.type !== 'heartbeat' && data.type !== 'heartbeat_ack') {
@@ -667,27 +661,39 @@ const ConnectionManager = (() => {
         
         switch (data.type) {
             case 'peer_info':
-                // Store peer information
-                state.peers[peerId] = {
-                    id: peerId,
-                    name: data.userName || 'Unknown User',
-                    isHost: data.isHost || false,
-                    color: data.color || getColorForUser(peerId)
-                };
-                
-                // Notify state change
-                notifyStateChange();
-                
-                // Add system message to chat if this is a new connection
-                if (window.MentalPlayer && window.MentalPlayer.addChatMessage) {
-                    window.MentalPlayer.addChatMessage('system', '', `${state.peers[peerId].name} has joined the room.`);
+                // Store peer information but prevent duplicates if it's the host
+                if (peerId !== state.userId) {
+                    // Only update for non-self peers
+                    state.peers[peerId] = {
+                        id: peerId,
+                        name: data.userName || 'Unknown User',
+                        isHost: data.isHost || false,
+                        color: data.color || getColorForUser(peerId)
+                    };
+                    
+                    // Notify state change
+                    notifyStateChange();
+                    
+                    // Add system message to chat if this is a new connection
+                    if (window.MentalPlayer && window.MentalPlayer.addChatMessage) {
+                        window.MentalPlayer.addChatMessage('system', '', `${state.peers[peerId].name} has joined the room.`);
+                    }
                 }
                 break;
                 
             case 'peer_list':
-                // Update our peer list with the received list
+                // Update our peer list with the received list, but preserve our own entry
                 if (data.peers && typeof data.peers === 'object') {
+                    // Keep our own info
+                    const selfInfo = state.peers[state.userId];
+                    
+                    // Update peer list
                     state.peers = data.peers;
+                    
+                    // Make sure we don't override our own entry
+                    if (selfInfo) {
+                        state.peers[state.userId] = selfInfo;
+                    }
                     
                     // Notify state change
                     notifyStateChange();
@@ -719,15 +725,17 @@ const ConnectionManager = (() => {
             case 'chat_message':
                 // Handle chat message
                 if (data.message && window.MentalPlayer && window.MentalPlayer.addChatMessage) {
-                    const peerName = state.peers[peerId] ? state.peers[peerId].name : 'Unknown User';
-                    window.MentalPlayer.addChatMessage(peerId, peerName, data.message);
+                    const peerName = state.peers[data.peerId || peerId] ? 
+                                    state.peers[data.peerId || peerId].name : 'Unknown User';
+                    window.MentalPlayer.addChatMessage(data.peerId || peerId, peerName, data.message);
                 }
                 
                 // If we're the host, forward the message to all other peers
                 if (state.isHost) {
+                    // Make sure we're not losing the original sender ID
                     broadcastToPeers({
                         type: 'chat_message',
-                        peerId: peerId,
+                        peerId: data.peerId || peerId, // Preserve original sender
                         message: data.message
                     }, [peerId]); // Exclude the sender
                 }
@@ -753,11 +761,16 @@ const ConnectionManager = (() => {
                 
                 // If we're the host, forward the message to all other peers
                 if (state.isHost) {
-                    broadcastToPeers({
-                        type: 'game_data',
-                        gameId: data.gameId,
-                        data: data.data
-                    }, [peerId]); // Exclude the sender
+                    // For game data, make sure we're preserving the original sender if available
+                    if (!data.originator && data.senderId) {
+                        const dataToSend = {
+                            ...data,
+                            originator: data.senderId // Preserve original sender
+                        };
+                        broadcastToPeers(dataToSend, [peerId]); // Exclude sender
+                    } else {
+                        broadcastToPeers(data, [peerId]); // Exclude sender
+                    }
                 }
                 break;
                 
@@ -813,15 +826,21 @@ const ConnectionManager = (() => {
     function broadcastToPeers(data, excludePeerIds = []) {
         let sentCount = 0;
         
+        // Log detail about what's being broadcast (for debugging)
+        log(`Broadcasting ${data.type} to peers (excluding ${excludePeerIds.length} peers)`, 'debug');
+        
         Object.keys(state.activeConnections).forEach(peerId => {
             // Skip excluded peers
-            if (excludePeerIds.includes(peerId)) return;
+            if (excludePeerIds.includes(peerId)) {
+                return;
+            }
             
             if (sendToPeer(peerId, data)) {
                 sentCount++;
             }
         });
         
+        log(`Broadcast completed. Sent to ${sentCount} peers.`, 'debug');
         return sentCount;
     }
     

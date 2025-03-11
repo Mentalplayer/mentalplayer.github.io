@@ -410,6 +410,17 @@ input:focus, select:focus {
     justify-content: center;
     align-items: center;
     z-index: 1000;
+    opacity: 0;
+    animation: fade-in 0.3s forwards;
+}
+
+.modal.showing {
+    display: flex;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 .modal-content {
@@ -419,6 +430,13 @@ input:focus, select:focus {
     width: 90%;
     max-width: 500px;
     box-shadow: var(--shadow-lg);
+    transform: translateY(20px);
+    animation: slide-up 0.3s forwards;
+}
+
+@keyframes slide-up {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
 }
 
 .modal-header {
@@ -452,6 +470,17 @@ input:focus, select:focus {
     cursor: pointer;
     font-weight: 500;
     transition: background-color 0.2s;
+}
+
+/* Shake effect for entry modal */
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+    20%, 40%, 60%, 80% { transform: translateX(5px); }
+}
+
+.shake-effect {
+    animation: shake 0.5s;
 }
 
 /* Footer */
