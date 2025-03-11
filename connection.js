@@ -803,8 +803,8 @@ const ConnectionManager = (() => {
                 break;
                 
             case 'chat_message':
-                // Find the correct sender ID (could be senderId or peerId depending on how it was forwarded)
-                let actualSenderId = data.senderId || data.peerId || peerId;
+                // Find the correct sender ID
+                const actualSenderId = data.senderId || data.peerId || peerId;
     
                 // Get sender name
                 let senderName = 'Unknown User';
@@ -812,19 +812,23 @@ const ConnectionManager = (() => {
                     senderName = state.peers[actualSenderId].name;
                 }
     
-                console.log(`[Connection] Processing chat message from ${senderName} (${actualSenderId}): ${data.message}`);
+                console.log(`[Connection] IMPORTANT: Chat message from ${senderName}: ${data.message}`);
     
-                // Handle chat message display
-                if (data.message && window.MentalPlayer && window.MentalPlayer.addChatMessage) {
-                    // Call the UI function with the correct parameters
+                // Try emergency direct update first
+                if (window.emergencyChatDisplay) {
+                    const success = window.emergencyChatDisplay(actualSenderId, senderName, data.message);
+                    console.log(`[Connection] Emergency chat display ${success ? 'succeeded' : 'failed'}`);
+                }
+    
+                // Also try normal channel as backup
+                if (window.MentalPlayer && window.MentalPlayer.addChatMessage) {
                     window.MentalPlayer.addChatMessage(actualSenderId, senderName, data.message);
                 }
     
-                // If we're the host, forward the message to all other peers
+                // If we're the host, forward the message
                 if (state.isHost) {
                     broadcastToPeers({
                         type: 'chat_message',
-                        // Include original sender info in forwarded message
                         senderId: actualSenderId,
                         message: data.message
                     }, [peerId]); // Exclude the sender
@@ -844,6 +848,9 @@ const ConnectionManager = (() => {
                 break;
                 
             case 'game_data':
+                // Log the game data message
+                console.log(`[Connection] Game data from ${peerId}:`, data);
+    
                 // Forward game-specific data to the game module
                 if (window.MentalPlayer && window.MentalPlayer.handleGameMessage) {
                     window.MentalPlayer.handleGameMessage(peerId, data);
@@ -851,8 +858,9 @@ const ConnectionManager = (() => {
     
                 // If we're the host, forward the message to all other peers
                 if (state.isHost) {
-                    // IMPORTANT: Forward the ORIGINAL message structure without modifying it
-                    broadcastToPeers(data, [peerId]); // Exclude sender
+                    // IMPORTANT: Forward the EXACT same message structure
+                    console.log(`[Connection] Host forwarding game data to other peers`);
+                    broadcastToPeers(data, [peerId]); // Exclude the sender
                 }
                 break;
                 

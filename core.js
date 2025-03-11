@@ -7,6 +7,49 @@
 
 // Create main namespace
 const MentalPlayer = (() => {
+    // Emergency direct UI update function
+    window.emergencyChatDisplay = function(userId, userName, message) {
+        console.log(`[EMERGENCY] Displaying chat message from ${userName}: ${message}`);
+    
+        // Get chat container directly from DOM every time
+        const chatContainer = document.getElementById('chat-messages');
+    
+        if (!chatContainer) {
+            console.error("[EMERGENCY] CRITICAL ERROR: Chat container not found in DOM!");
+            alert("UI Error: Chat container missing. Please refresh the page.");
+            return false;
+        }
+    
+        // Create message element directly
+        const messageEl = document.createElement('div');
+    
+        if (userId === 'system') {
+            messageEl.className = 'system-message';
+            messageEl.innerHTML = `<div class="message-text">${message}</div>`;
+        } else {
+            // Determine if this is the current user
+            const isCurrentUser = userId === MentalPlayer.state?.user?.id;
+            messageEl.className = `chat-message ${isCurrentUser ? 'own-message' : 'peer-message'}`;
+        
+            let html = '';
+            if (!isCurrentUser) {
+                // Add sender name for messages from others
+                html += `<div class="message-sender" style="color: #4a6fa5">${userName}</div>`;
+            }
+        
+            html += `<div class="message-text">${message}</div>`;
+            messageEl.innerHTML = html;
+        }
+    
+        // Append directly to container
+        chatContainer.appendChild(messageEl);
+    
+        // Force scroll to bottom
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    
+        // Return true if successful
+        return true;
+    };
     // Private members
     
     // Application state
@@ -791,14 +834,12 @@ const MentalPlayer = (() => {
      * @param {string} message Message text
      */
     function addChatMessage(userId, userName, message) {
-
-        if (!elements.chatMessages) return;
+        console.log(`[Chat] Adding message from ${userName}(${userId}): "${message}"`);
     
-        console.log(`[MentalPlayer] Adding chat message from ${userName}(${userId}): ${message}`);
-
         if (!elements.chatMessages) {
             console.error("[Chat] Cannot add message: chat container not found!");
-            return;
+            // Try emergency direct approach
+            return window.emergencyChatDisplay(userId, userName, message);
         }
     
         // Create message element
@@ -817,7 +858,7 @@ const MentalPlayer = (() => {
             let html = '';
             if (!isOwnMessage) {
                 // Try to get color from connection manager
-                let color = '#808080';
+                let color = '#4a6fa5';
                 if (window.ConnectionManager && window.ConnectionManager.getPeerColor) {
                     color = window.ConnectionManager.getPeerColor(userId) || color;
                 }
@@ -834,10 +875,13 @@ const MentalPlayer = (() => {
     
         // Scroll to bottom
         elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
-
+    
+        // Force layout recalculation
         elements.chatMessages.style.display = 'none';
         void elements.chatMessages.offsetHeight; // Force reflow
         elements.chatMessages.style.display = 'flex';
+    
+        return true;
     }
     
     /**

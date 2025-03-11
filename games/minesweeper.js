@@ -7,6 +7,62 @@
 
 // Create Minesweeper module using IIFE pattern
 const MinesweeperGame = (() => {
+    // Emergency direct handlers
+    window.emergencyMinesweeperHandlers = {
+        handleCellClick: function(row, col, playerId) {
+            console.log(`[EMERGENCY] Handling cell click at ${row},${col} from ${playerId}`);
+            
+            // Get the appropriate cell directly
+            const board = document.querySelector('.game-board');
+            if (!board) {
+                console.error("[EMERGENCY] Game board not found!");
+                return false;
+            }
+            
+            const cell = board.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+            if (!cell) {
+                console.error(`[EMERGENCY] Cell ${row},${col} not found!`);
+                return false;
+            }
+            
+            // Simulate a click on this cell
+            const clickEvent = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+            });
+            cell.dispatchEvent(clickEvent);
+            return true;
+        },
+        
+        toggleFlag: function(row, col, playerId) {
+            console.log(`[EMERGENCY] Toggling flag at ${row},${col} from ${playerId}`);
+            
+            // Get the appropriate cell directly
+            const board = document.querySelector('.game-board');
+            if (!board) {
+                console.error("[EMERGENCY] Game board not found!");
+                return false;
+            }
+            
+            const cell = board.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+            if (!cell) {
+                console.error(`[EMERGENCY] Cell ${row},${col} not found!`);
+                return false;
+            }
+            
+            // Simulate a right click
+            const contextMenuEvent = new MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+            });
+            cell.dispatchEvent(contextMenuEvent);
+            return true;
+        }
+    };
+
+
     // Game metadata
     const metadata = {
         id: 'minesweeper',
@@ -812,44 +868,65 @@ const MinesweeperGame = (() => {
      * @param {Object} message Message data
      */
     function handleMessage(peerId, message) {
-
-        // Log the raw message for debugging
-        console.log(`[Minesweeper] Raw message received:`, message);
+        // Log full message
+        console.log(`[Minesweeper] Message received from ${peerId}:`, message);
     
-        let gameData;
+        // Extract game data from different possible message structures
+        let gameData = null;
     
-        // Handle different message structures
-        if (message.gameId === 'minesweeper' && message.data) {
-            // Structure: {type: "game_data", gameId: "minesweeper", data: {game, action, ...}}
+        if (message.data && message.data.game === 'minesweeper') {
+            // Standard structure: { data: { game: 'minesweeper', action: '...' } }
             gameData = message.data;
-        } else if (message.data && message.data.game === 'minesweeper') {
-            // Structure: {data: {game: "minesweeper", action, ...}}
+        } else if (message.gameId === 'minesweeper' && message.data) {
+            // Alternate structure: { gameId: 'minesweeper', data: { ... } }
             gameData = message.data;
-        } else {
-            console.warn('[Minesweeper] Unrecognized message format:', message);
+        }
+    
+        if (!gameData || !gameData.action) {
+            console.warn('[Minesweeper] Invalid message format or missing action:', message);
             return;
         }
     
-        if (!gameData.action) {
-            console.warn('[Minesweeper] Received message without action');
-            return;
-        }
+        console.log(`[Minesweeper] Processing action: ${gameData.action} with data:`, gameData);
     
-        console.log(`[Minesweeper] Processing action: ${gameData.action}`);
-    
-        // Continue with existing switch statement using gameData.action
+        // Handle specific actions
         switch (gameData.action) {
             case 'cell_click':
-                revealCell(data.row, data.col, peerId);
+                console.log(`[Minesweeper] Cell click at row:${gameData.row}, col:${gameData.col}`);
+            
+                // Try emergency handler first
+                if (window.emergencyMinesweeperHandlers && 
+                    window.emergencyMinesweeperHandlers.handleCellClick) {
+                    const success = window.emergencyMinesweeperHandlers.handleCellClick(
+                        gameData.row, gameData.col, peerId
+                    );
+                    console.log(`[Minesweeper] Emergency cell click handler ${success ? 'succeeded' : 'failed'}`);
+                }
+            
+                // Also try normal handler
+                revealCell(gameData.row, gameData.col, peerId);
                 break;
-                
+            
             case 'cell_flag':
+                console.log(`[Minesweeper] Cell flag at row:${gameData.row}, col:${gameData.col}`);
+            
+                // Try emergency handler first
+                if (window.emergencyMinesweeperHandlers && 
+                    window.emergencyMinesweeperHandlers.toggleFlag) {
+                    const success = window.emergencyMinesweeperHandlers.toggleFlag(
+                        gameData.row, gameData.col, peerId
+                    );
+                    console.log(`[Minesweeper] Emergency flag handler ${success ? 'succeeded' : 'failed'}`);
+                }
+            
+                // Also try normal handler
                 // Set flag directly to specified state
-                if (data.flagged !== state.board[data.row][data.col].flagged) {
-                    toggleFlag(data.row, data.col, peerId);
+                if (gameData.flagged !== state.board[gameData.row][gameData.col].flagged) {
+                    toggleFlag(gameData.row, gameData.col, peerId);
                 }
                 break;
-                
+            
+            // Keep the rest of the cases the same...
             case 'game_started':
                 state.gameStarted = true;
                 // Start timer if not host
@@ -857,20 +934,20 @@ const MinesweeperGame = (() => {
                     startTimer();
                 }
                 break;
-                
+            
             case 'mines_placed':
                 // Only apply if we're not the host
                 if (state.context && state.context.connection && !state.context.connection.state.isHost) {
                     // Set mines
                     state.mines = data.mines;
-                    
+                
                     // Update board
                     state.mines.forEach(mine => {
                         if (mine.row < state.rows && mine.col < state.cols) {
                             state.board[mine.row][mine.col].hasMine = true;
                         }
                     });
-                    
+                
                     // Calculate neighbor counts
                     for (let row = 0; row < state.rows; row++) {
                         for (let col = 0; col < state.cols; col++) {
@@ -881,7 +958,7 @@ const MinesweeperGame = (() => {
                     }
                 }
                 break;
-                
+            
             case 'timer_sync':
                 // Update timer if we're not the host
                 if (state.context && state.context.connection && !state.context.connection.state.isHost) {
@@ -889,23 +966,23 @@ const MinesweeperGame = (() => {
                     updateTimerDisplay();
                 }
                 break;
-                
+            
             case 'game_over':
                 // Only handle if game not already over
                 if (!state.gameOver) {
                     state.gameOver = true;
                     state.gameWon = data.won;
                     stopTimer();
-                    
+                
                     // Update timer
                     state.timer = data.timer;
                     updateTimerDisplay();
-                    
+                
                     // Update UI
                     if (elements.resetButton) {
                         elements.resetButton.textContent = data.won ? '😎' : '😵';
                     }
-                    
+                
                     // Show result
                     if (data.won) {
                         // Flag all mines
@@ -922,22 +999,22 @@ const MinesweeperGame = (() => {
                         // Reveal all mines
                         revealAllMines();
                     }
-                    
+                
                     // Show game result
                     showGameResult(data.won, data.playerId);
                 }
                 break;
-                
+            
             case 'reset':
                 // Apply new difficulty if provided
                 if (data.difficulty && data.difficulty !== state.difficulty) {
                     applyDifficulty(data.difficulty);
                 }
-                
+            
                 // Reset game
                 resetGame();
                 break;
-                
+            
             case 'difficulty_changed':
                 // Apply new difficulty
                 if (data.difficulty) {
