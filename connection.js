@@ -841,14 +841,11 @@ const ConnectionManager = (() => {
                 if (window.MentalPlayer && window.MentalPlayer.handleGameMessage) {
                     window.MentalPlayer.handleGameMessage(peerId, data);
                 }
-                
+    
                 // If we're the host, forward the message to all other peers
                 if (state.isHost) {
-                    // Preserve the entire message structure and add original sender info
-                    broadcastToPeers({
-                        ...data,
-                        originalSender: peerId // Add original sender ID
-                    }, [peerId]); // Exclude the sender
+                    // IMPORTANT: Forward the ORIGINAL message structure without modifying it
+                    broadcastToPeers(data, [peerId]); // Exclude sender
                 }
                 break;
                 

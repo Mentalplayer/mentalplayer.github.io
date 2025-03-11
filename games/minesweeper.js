@@ -813,24 +813,32 @@ const MinesweeperGame = (() => {
      */
     function handleMessage(peerId, message) {
 
-        // Log all incoming game messages
-        console.log(`[Minesweeper] Received message from ${peerId}:`, message);
-
-        // Ignore non-game messages
-        if (!message || !message.data || message.gameId !== 'minesweeper') {
+        // Log the raw message for debugging
+        console.log(`[Minesweeper] Raw message received:`, message);
+    
+        let gameData;
+    
+        // Handle different message structures
+        if (message.gameId === 'minesweeper' && message.data) {
+            // Structure: {type: "game_data", gameId: "minesweeper", data: {game, action, ...}}
+            gameData = message.data;
+        } else if (message.data && message.data.game === 'minesweeper') {
+            // Structure: {data: {game: "minesweeper", action, ...}}
+            gameData = message.data;
+        } else {
+            console.warn('[Minesweeper] Unrecognized message format:', message);
             return;
         }
-        
-        const data = message.data;
-        
-        if (!data.action) {
+    
+        if (!gameData.action) {
             console.warn('[Minesweeper] Received message without action');
             return;
         }
-        
-        console.log(`[Minesweeper] Received action '${data.action}' from peer ${peerId}`);
-        
-        switch (data.action) {
+    
+        console.log(`[Minesweeper] Processing action: ${gameData.action}`);
+    
+        // Continue with existing switch statement using gameData.action
+        switch (gameData.action) {
             case 'cell_click':
                 revealCell(data.row, data.col, peerId);
                 break;
