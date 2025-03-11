@@ -883,4 +883,15 @@ input:focus, select:focus {
     .debug-header .close-button {
         cursor: pointer;
     }
+
+    /* Visual feedback for game updates */
+    @keyframes cell-update-pulse {
+        0% { transform: scale(1); filter: brightness(1); }
+        50% { transform: scale(1.1); filter: brightness(1.2); }
+        100% { transform: scale(1); filter: brightness(1); }
+    }
+
+    .cell.revealed, .cell.flagged {
+        animation: cell-update-pulse 0.3s ease-out;
+    }
 }

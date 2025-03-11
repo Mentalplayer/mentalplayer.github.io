@@ -7,57 +7,138 @@
 
 // Create Minesweeper module using IIFE pattern
 const MinesweeperGame = (() => {
-    // Emergency direct handlers
+    // Emergency direct handlers with visual feedback
     window.emergencyMinesweeperHandlers = {
-        handleCellClick: function(row, col, playerId) {
-            console.log(`[EMERGENCY] Handling cell click at ${row},${col} from ${playerId}`);
-            
-            // Get the appropriate cell directly
-            const board = document.querySelector('.game-board');
-            if (!board) {
-                console.error("[EMERGENCY] Game board not found!");
-                return false;
-            }
-            
-            const cell = board.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+        // Store the current game state for emergency access
+        gameState: {
+            board: [],
+            initialized: false
+        },
+    
+        // Initialize emergency state
+        initialize: function(rows, cols) {
+            this.gameState.board = Array(rows).fill().map(() => Array(cols).fill().map(() => ({
+                revealed: false,
+                flagged: false,
+                hasMine: false
+            })));
+            this.gameState.initialized = true;
+            console.log(`[EMERGENCY] Initialized emergency state with ${rows}x${cols} board`);
+        },
+    
+        // Force visual update of a cell
+        updateCellVisual: function(row, col, state) {
+            const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
             if (!cell) {
                 console.error(`[EMERGENCY] Cell ${row},${col} not found!`);
                 return false;
             }
+        
+            // Update class and content based on state
+            if (state.revealed) {
+                cell.classList.add('revealed');
             
-            // Simulate a click on this cell
-            const clickEvent = new MouseEvent('click', {
-                bubbles: true,
-                cancelable: true,
-                view: window
-            });
-            cell.dispatchEvent(clickEvent);
+                if (state.hasMine) {
+                    cell.classList.add('mine');
+                    cell.textContent = '💣';
+                } else if (state.neighborMines > 0) {
+                    cell.textContent = state.neighborMines;
+                    cell.classList.add(`neighbors-${state.neighborMines}`);
+                } else {
+                    cell.textContent = '';
+                }
+            } else if (state.flagged) {
+                cell.classList.add('flagged');
+                cell.textContent = '🚩';
+            }
+        
+            // Force visual refresh
+            cell.style.opacity = '0.99';
+            setTimeout(() => { cell.style.opacity = '1'; }, 10);
+        
             return true;
         },
+    
+        // Handle cell reveal directly
+        revealCell: function(row, col, playerId) {
+            console.log(`[EMERGENCY] Revealing cell at ${row},${col} from ${playerId}`);
         
-        toggleFlag: function(row, col, playerId) {
-            console.log(`[EMERGENCY] Toggling flag at ${row},${col} from ${playerId}`);
-            
-            // Get the appropriate cell directly
+            // Update our emergency state
+            if (this.gameState.initialized && 
+                this.gameState.board[row] && 
+                this.gameState.board[row][col]) {
+                this.gameState.board[row][col].revealed = true;
+            }
+        
+            // Force visual update via DOM
             const board = document.querySelector('.game-board');
             if (!board) {
                 console.error("[EMERGENCY] Game board not found!");
                 return false;
             }
-            
+        
             const cell = board.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
             if (!cell) {
                 console.error(`[EMERGENCY] Cell ${row},${col} not found!`);
                 return false;
             }
+        
+            // Apply visual changes directly
+            cell.classList.add('revealed');
+            cell.style.backgroundColor = '#e0e0e0';
+            cell.style.border = '1px solid #b0b0b0';
+        
+            // Force visual refresh
+            cell.style.opacity = '0.99';
+            setTimeout(() => { cell.style.opacity = '1'; }, 10);
             
-            // Simulate a right click
-            const contextMenuEvent = new MouseEvent('contextmenu', {
-                bubbles: true,
-                cancelable: true,
-                view: window
-            });
-            cell.dispatchEvent(contextMenuEvent);
+            
+            // Force visual refresh after revealing
+            forceRefreshCell(row, col);
+
+            return true;
+        },
+    
+        // Handle flag toggle directly
+        toggleFlag: function(row, col, playerId) {
+            console.log(`[EMERGENCY] Toggling flag at ${row},${col} from ${playerId}`);
+        
+            // Update our emergency state
+            if (this.gameState.initialized && 
+                this.gameState.board[row] && 
+                this.gameState.board[row][col]) {
+                this.gameState.board[row][col].flagged = !this.gameState.board[row][col].flagged;
+            }
+        
+            // Force visual update via DOM
+            const board = document.querySelector('.game-board');
+            if (!board) {
+                console.error("[EMERGENCY] Game board not found!");
+                return false;
+            }
+        
+            const cell = board.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+            if (!cell) {
+                console.error(`[EMERGENCY] Cell ${row},${col} not found!`);
+                return false;
+            }
+        
+            // Toggle flag visually
+            if (cell.classList.contains('flagged')) {
+                cell.classList.remove('flagged');
+                cell.textContent = '';
+            } else {
+                cell.classList.add('flagged');
+                cell.textContent = '🚩';
+            }
+        
+            // Force visual refresh
+            cell.style.opacity = '0.99';
+            setTimeout(() => { cell.style.opacity = '1'; }, 10);
+        
+            // Force visual refresh after flagging
+            forceRefreshCell(row, col);
+
             return true;
         }
     };
@@ -144,6 +225,11 @@ const MinesweeperGame = (() => {
         resetGame();
         
         console.log('[Minesweeper] Game initialized');
+
+        if (window.emergencyMinesweeperHandlers) {
+            window.emergencyMinesweeperHandlers.initialize(state.rows, state.cols);
+        }
+        console.log('[Minesweeper] Initialized game with emergency handlers');
         
         return true;
     }
@@ -868,65 +954,57 @@ const MinesweeperGame = (() => {
      * @param {Object} message Message data
      */
     function handleMessage(peerId, message) {
-        // Log full message
-        console.log(`[Minesweeper] Message received from ${peerId}:`, message);
+        // Log full message for debugging
+        console.log(`[Minesweeper] Raw message from ${peerId}:`, JSON.stringify(message));
     
-        // Extract game data from different possible message structures
-        let gameData = null;
+        let gameData;
     
+        // Handle different message structures
         if (message.data && message.data.game === 'minesweeper') {
-            // Standard structure: { data: { game: 'minesweeper', action: '...' } }
+            // Structure: {data: {game: 'minesweeper', action: ...}}
             gameData = message.data;
         } else if (message.gameId === 'minesweeper' && message.data) {
-            // Alternate structure: { gameId: 'minesweeper', data: { ... } }
+            // Structure: {gameId: 'minesweeper', data: {...}}
             gameData = message.data;
-        }
-    
-        if (!gameData || !gameData.action) {
-            console.warn('[Minesweeper] Invalid message format or missing action:', message);
+        } else {
+            console.warn('[Minesweeper] Unrecognized message format:', message);
             return;
         }
     
-        console.log(`[Minesweeper] Processing action: ${gameData.action} with data:`, gameData);
+        if (!gameData.action) {
+            console.warn('[Minesweeper] Received message without action');
+            return;
+        }
     
-        // Handle specific actions
+        console.log(`[Minesweeper] Processing action '${gameData.action}' from peer ${peerId}`);
+    
         switch (gameData.action) {
             case 'cell_click':
-                console.log(`[Minesweeper] Cell click at row:${gameData.row}, col:${gameData.col}`);
+                console.log(`[Minesweeper] CELL CLICK at row:${gameData.row}, col:${gameData.col}`);
             
                 // Try emergency handler first
-                if (window.emergencyMinesweeperHandlers && 
-                    window.emergencyMinesweeperHandlers.handleCellClick) {
-                    const success = window.emergencyMinesweeperHandlers.handleCellClick(
-                        gameData.row, gameData.col, peerId
-                    );
-                    console.log(`[Minesweeper] Emergency cell click handler ${success ? 'succeeded' : 'failed'}`);
+                if (window.emergencyMinesweeperHandlers) {
+                    window.emergencyMinesweeperHandlers.revealCell(gameData.row, gameData.col, peerId);
                 }
             
-                // Also try normal handler
+                // Also try regular handler
                 revealCell(gameData.row, gameData.col, peerId);
                 break;
             
             case 'cell_flag':
-                console.log(`[Minesweeper] Cell flag at row:${gameData.row}, col:${gameData.col}`);
+                console.log(`[Minesweeper] FLAG TOGGLE at row:${gameData.row}, col:${gameData.col}`);
             
                 // Try emergency handler first
-                if (window.emergencyMinesweeperHandlers && 
-                    window.emergencyMinesweeperHandlers.toggleFlag) {
-                    const success = window.emergencyMinesweeperHandlers.toggleFlag(
-                        gameData.row, gameData.col, peerId
-                    );
-                    console.log(`[Minesweeper] Emergency flag handler ${success ? 'succeeded' : 'failed'}`);
+                if (window.emergencyMinesweeperHandlers) {
+                    window.emergencyMinesweeperHandlers.toggleFlag(gameData.row, gameData.col, peerId);
                 }
             
-                // Also try normal handler
-                // Set flag directly to specified state
+                // Also try regular handler
                 if (gameData.flagged !== state.board[gameData.row][gameData.col].flagged) {
                     toggleFlag(gameData.row, gameData.col, peerId);
                 }
                 break;
-            
-            // Keep the rest of the cases the same...
+
             case 'game_started':
                 state.gameStarted = true;
                 // Start timer if not host
@@ -1326,6 +1404,37 @@ const MinesweeperGame = (() => {
             }
         }
     };
+
+    /**
+     * Force visual refresh of a cell
+     * @param {number} row Row index
+     * @param {number} col Column index
+     */
+    function forceRefreshCell(row, col) {
+        const cellElement = getCellElement(row, col);
+        if (cellElement) {
+            // Update based on state
+            if (state.board[row][col].revealed) {
+                cellElement.classList.add('revealed');
+            
+                if (state.board[row][col].hasMine) {
+                    cellElement.classList.add('mine');
+                    cellElement.textContent = '💣';
+                } else if (state.board[row][col].neighborMines > 0) {
+                    cellElement.textContent = state.board[row][col].neighborMines;
+                    cellElement.classList.add(`neighbors-${state.board[row][col].neighborMines}`);
+                }
+            } else if (state.board[row][col].flagged) {
+                cellElement.classList.add('flagged');
+                cellElement.textContent = '🚩';
+            }
+        
+            // Force visual refresh
+            cellElement.style.display = 'none';
+            void cellElement.offsetHeight; // Force reflow
+            cellElement.style.display = 'flex';
+        }
+    }
 })();
 
 // Register with GameRegistry if available

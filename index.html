@@ -439,12 +439,42 @@
                 }
             }
         }, 2000); // Check every 2 seconds
+    </script>
+
+    <!-- Emergency Game Reset Button -->
+    <div id="game-emergency" style="position: fixed; bottom: 50px; right: 10px; z-index: 9999; display: none;">
+        <button id="force-game-sync" style="background: #e74c3c; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold;">
+            Force Game Sync
+        </button>
+    </div>
+
+    <script>
+        // Show emergency button when in a game
+        setInterval(() => {
+            const gameContainer = document.getElementById('game-container');
+            const emergencyButton = document.getElementById('game-emergency');
+        
+            if (gameContainer && emergencyButton) {
+                // Show button when in game view
+                if (gameContainer.style.display === 'block') {
+                    emergencyButton.style.display = 'block';
+                } else {
+                    emergencyButton.style.display = 'none';
+                }
+            }
+        }, 1000);
     
-        // Add an indicator to show that the fix is active
-        const debugIndicator = document.createElement('div');
-        debugIndicator.style.cssText = 'position:fixed; top:10px; right:10px; background:rgba(0,100,0,0.7); color:white; padding:5px; border-radius:5px; font-size:12px; z-index:9999;';
-        debugIndicator.textContent = 'UI Fix Active';
-        document.body.appendChild(debugIndicator);
+        // Add click handler
+        document.getElementById('force-game-sync').addEventListener('click', () => {
+            // Force game reset through existing reset button
+            const resetButton = document.querySelector('.reset-button');
+            if (resetButton) {
+                resetButton.click();
+                alert('Game reset forced! This should synchronize all players.');
+            } else {
+                alert('Game reset button not found. Try refreshing the page.');
+            }
+        });
     </script>
 </body>
 </html>
