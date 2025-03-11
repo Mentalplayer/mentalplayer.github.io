@@ -792,12 +792,12 @@ const MentalPlayer = (() => {
      */
     function addChatMessage(userId, userName, message) {
         if (!elements.chatMessages) return;
-        
+    
         console.log(`[MentalPlayer] Adding chat message from ${userName}(${userId}): ${message}`);
-        
+    
         // Create message element
         const messageEl = document.createElement('div');
-        
+    
         if (userId === 'system') {
             // System message
             messageEl.className = 'system-message';
@@ -806,7 +806,7 @@ const MentalPlayer = (() => {
             // User message
             const isOwnMessage = userId === state.user.id;
             messageEl.className = `chat-message ${isOwnMessage ? 'own-message' : 'peer-message'}`;
-            
+        
             // Add sender name for peer messages
             let html = '';
             if (!isOwnMessage) {
@@ -815,17 +815,17 @@ const MentalPlayer = (() => {
                 if (window.ConnectionManager && window.ConnectionManager.getPeerColor) {
                     color = window.ConnectionManager.getPeerColor(userId) || color;
                 }
-                
+            
                 html += `<div class="message-sender" style="color: ${color}">${userName}</div>`;
             }
-            
+        
             html += `<div class="message-text">${message}</div>`;
             messageEl.innerHTML = html;
         }
-        
+    
         // Add to chat
         elements.chatMessages.appendChild(messageEl);
-        
+    
         // Scroll to bottom
         elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
     }

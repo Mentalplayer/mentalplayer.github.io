@@ -2,7 +2,7 @@
  * ConnectionManager for MentalPlayer
  * Handles WebRTC peer-to-peer connections using PeerJS
  * 
- * @version 2.0.0
+ * @version 2.1.0
  */
 
 const ConnectionManager = (() => {
@@ -44,6 +44,44 @@ const ConnectionManager = (() => {
         onStateChangeCallback: null // Callback for state changes
     };
     
+    // Debug message queue
+    const debugMessages = [];
+    
+    /**
+     * Log a debug message
+     * @param {string} direction Message direction (SENT, RECEIVED)
+     * @param {string} type Message type
+     * @param {Object} content Message content
+     */
+    function logDebugMessage(direction, type, content) {
+        if (!config.debug) return;
+        
+        const msg = {
+            time: new Date().toLocaleTimeString(),
+            direction, type, content
+        };
+        
+        debugMessages.push(msg);
+        if (debugMessages.length > 50) debugMessages.shift();
+        
+        // Log to console
+        log(`${direction} ${type}: ${JSON.stringify(content)}`, 'debug');
+        
+        // Update display if available
+        const debugContainer = document.getElementById('connection-debug');
+        if (debugContainer) {
+            const msgEl = document.createElement('div');
+            msgEl.className = `debug-message ${direction.toLowerCase()}`;
+            msgEl.innerText = `${msg.time} [${direction}] ${type}: ${JSON.stringify(content).slice(0, 100)}${content.length > 100 ? '...' : ''}`;
+            debugContainer.prepend(msgEl);
+            
+            // Limit number of displayed messages
+            if (debugContainer.children.length > 20) {
+                debugContainer.removeChild(debugContainer.lastChild);
+            }
+        }
+    }
+    
     /**
      * Initialize the connection manager
      * @param {Object} options Options for initialization
@@ -76,8 +114,50 @@ const ConnectionManager = (() => {
         // Initialize PeerJS
         initializePeer();
         
+        // Create debug panel if in debug mode
+        if (config.debug) {
+            createDebugPanel();
+        }
+        
         // Set initialized flag
         initialized = true;
+    }
+    
+    /**
+     * Create debug panel for connection monitoring
+     */
+    function createDebugPanel() {
+        if (document.getElementById('connection-debug-container')) return;
+        
+        const container = document.createElement('div');
+        container.id = 'connection-debug-container';
+        container.style.cssText = 'position:fixed; bottom:10px; right:10px; width:400px; background:rgba(0,0,0,0.7); color:white; font-family:monospace; font-size:11px; z-index:10000; border-radius:5px; max-height:300px; overflow:auto;';
+        
+        const header = document.createElement('div');
+        header.style.cssText = 'padding:5px; background:rgba(0,0,0,0.5); display:flex; justify-content:space-between;';
+        header.innerHTML = '<span>Connection Debug</span><span id="connection-debug-close" style="cursor:pointer;">×</span>';
+        
+        const content = document.createElement('div');
+        content.id = 'connection-debug';
+        content.style.cssText = 'padding:5px; max-height:250px; overflow-y:auto;';
+        
+        container.appendChild(header);
+        container.appendChild(content);
+        document.body.appendChild(container);
+        
+        // Add styles
+        const style = document.createElement('style');
+        style.textContent = `
+            .debug-message { margin-bottom: 3px; padding: 3px; border-radius: 3px; }
+            .debug-message.sent { background: rgba(0, 100, 0, 0.3); }
+            .debug-message.received { background: rgba(0, 0, 100, 0.3); }
+        `;
+        document.head.appendChild(style);
+        
+        // Add event listeners
+        document.getElementById('connection-debug-close').addEventListener('click', () => {
+            container.style.display = 'none';
+        });
     }
     
     /**
@@ -656,7 +736,7 @@ const ConnectionManager = (() => {
         
         // Skip logging heartbeat messages to avoid noise
         if (data.type !== 'heartbeat' && data.type !== 'heartbeat_ack') {
-            log(`Received message from ${peerId}: ${JSON.stringify(data)}`, 'debug');
+            logDebugMessage('RECEIVED', data.type, data);
         }
         
         switch (data.type) {
@@ -723,19 +803,22 @@ const ConnectionManager = (() => {
                 break;
                 
             case 'chat_message':
+                // Determine the actual sender ID (from data.peerId if forwarded, or from the direct sender)
+                const senderId = data.peerId || peerId;
+                const senderName = state.peers[senderId] ? 
+                                 state.peers[senderId].name : 'Unknown User';
+                
                 // Handle chat message
                 if (data.message && window.MentalPlayer && window.MentalPlayer.addChatMessage) {
-                    const peerName = state.peers[data.peerId || peerId] ? 
-                                    state.peers[data.peerId || peerId].name : 'Unknown User';
-                    window.MentalPlayer.addChatMessage(data.peerId || peerId, peerName, data.message);
+                    window.MentalPlayer.addChatMessage(senderId, senderName, data.message);
                 }
                 
                 // If we're the host, forward the message to all other peers
                 if (state.isHost) {
-                    // Make sure we're not losing the original sender ID
+                    // Make sure we're preserving the original sender ID
                     broadcastToPeers({
                         type: 'chat_message',
-                        peerId: data.peerId || peerId, // Preserve original sender
+                        peerId: senderId, // Important: Include original sender ID
                         message: data.message
                     }, [peerId]); // Exclude the sender
                 }
@@ -761,16 +844,11 @@ const ConnectionManager = (() => {
                 
                 // If we're the host, forward the message to all other peers
                 if (state.isHost) {
-                    // For game data, make sure we're preserving the original sender if available
-                    if (!data.originator && data.senderId) {
-                        const dataToSend = {
-                            ...data,
-                            originator: data.senderId // Preserve original sender
-                        };
-                        broadcastToPeers(dataToSend, [peerId]); // Exclude sender
-                    } else {
-                        broadcastToPeers(data, [peerId]); // Exclude sender
-                    }
+                    // Preserve the entire message structure and add original sender info
+                    broadcastToPeers({
+                        ...data,
+                        originalSender: peerId // Add original sender ID
+                    }, [peerId]); // Exclude the sender
                 }
                 break;
                 
@@ -809,6 +887,11 @@ const ConnectionManager = (() => {
         }
         
         try {
+            // Log all non-heartbeat messages
+            if (data.type !== 'heartbeat' && data.type !== 'heartbeat_ack') {
+                logDebugMessage('SENT', data.type, data);
+            }
+            
             connection.send(data);
             return true;
         } catch (error) {
@@ -827,7 +910,9 @@ const ConnectionManager = (() => {
         let sentCount = 0;
         
         // Log detail about what's being broadcast (for debugging)
-        log(`Broadcasting ${data.type} to peers (excluding ${excludePeerIds.length} peers)`, 'debug');
+        if (data.type !== 'heartbeat' && data.type !== 'heartbeat_ack') {
+            log(`Broadcasting ${data.type} to peers (excluding ${excludePeerIds.length} peers)`, 'debug');
+        }
         
         Object.keys(state.activeConnections).forEach(peerId => {
             // Skip excluded peers
@@ -840,7 +925,10 @@ const ConnectionManager = (() => {
             }
         });
         
-        log(`Broadcast completed. Sent to ${sentCount} peers.`, 'debug');
+        if (data.type !== 'heartbeat' && data.type !== 'heartbeat_ack') {
+            log(`Broadcast completed. Sent to ${sentCount} peers.`, 'debug');
+        }
+        
         return sentCount;
     }
     
@@ -855,13 +943,19 @@ const ConnectionManager = (() => {
             return false;
         }
         
+        // Add sender ID to any outgoing message
+        const messageWithSender = {
+            ...data,
+            senderId: state.userId
+        };
+        
         // If we're the host, broadcast to all peers
         if (state.isHost) {
-            return broadcastToPeers(data) > 0;
+            return broadcastToPeers(messageWithSender) > 0;
         }
         // Otherwise, send to the host
         else if (state.roomId) {
-            return sendToPeer(state.roomId, data);
+            return sendToPeer(state.roomId, messageWithSender);
         }
         
         return false;
@@ -1138,6 +1232,11 @@ const ConnectionManager = (() => {
                 userId: state.userId,
                 userName: state.userName,
             };
+        },
+        
+        // Expose debug messages queue
+        get debugMessages() {
+            return [...debugMessages];
         }
     };
 })();

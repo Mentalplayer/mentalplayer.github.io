@@ -383,5 +383,24 @@
             });
         });
     </script>
+
+    <!-- Debug Mode Button (for development) -->
+    <div id="debug-toggle" style="position: fixed; bottom: 10px; left: 10px; z-index: 1000; font-size: 12px;">
+        <button id="toggle-debug-button" style="background: #4a6fa5; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer;">
+            Toggle Debug
+        </button>
+    </div>
+
+    <script>
+        // Add debug mode toggle
+        document.getElementById('toggle-debug-button').addEventListener('click', function() {
+            const debugContainer = document.getElementById('connection-debug-container');
+            if (debugContainer) {
+                debugContainer.style.display = debugContainer.style.display === 'none' ? 'block' : 'none';
+            } else {
+                alert('Debug mode not initialized. Start a new connection to enable debug features.');
+            }
+        });
+    </script>
 </body>
 </html>

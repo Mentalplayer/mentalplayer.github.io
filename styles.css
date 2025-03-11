@@ -834,4 +834,53 @@ input:focus, select:focus {
     .user-info {
         margin-top: var(--spacing-sm);
     }
+
+    /* Debug Panel Styles */
+    .debug-message {
+        font-family: monospace;
+        font-size: 11px;
+        padding: 3px 5px;
+        margin-bottom: 2px;
+        border-radius: 3px;
+    }
+
+    .debug-message.sent {
+        background: rgba(0, 100, 0, 0.3);
+    }
+
+    .debug-message.received {
+        background: rgba(0, 0, 100, 0.3);
+    }
+
+    #connection-debug-container {
+        position: fixed;
+        bottom: 10px;
+        right: 10px;
+        width: 400px;
+        max-height: 300px;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 5px;
+        color: white;
+        z-index: 10000;
+        overflow: hidden;
+        display: none;
+    }
+
+    #connection-debug {
+        max-height: 250px;
+        overflow-y: auto;
+        padding: 5px;
+    }
+
+    .debug-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 5px;
+        background: rgba(0, 0, 0, 0.3);
+    }
+
+    .debug-header .close-button {
+        cursor: pointer;
+    }
 }
