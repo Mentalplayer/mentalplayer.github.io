@@ -791,9 +791,15 @@ const MentalPlayer = (() => {
      * @param {string} message Message text
      */
     function addChatMessage(userId, userName, message) {
+
         if (!elements.chatMessages) return;
     
         console.log(`[MentalPlayer] Adding chat message from ${userName}(${userId}): ${message}`);
+
+        if (!elements.chatMessages) {
+            console.error("[Chat] Cannot add message: chat container not found!");
+            return;
+        }
     
         // Create message element
         const messageEl = document.createElement('div');
@@ -828,6 +834,10 @@ const MentalPlayer = (() => {
     
         // Scroll to bottom
         elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+
+        elements.chatMessages.style.display = 'none';
+        void elements.chatMessages.offsetHeight; // Force reflow
+        elements.chatMessages.style.display = 'flex';
     }
     
     /**

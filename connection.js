@@ -803,22 +803,29 @@ const ConnectionManager = (() => {
                 break;
                 
             case 'chat_message':
-                // Determine the actual sender ID (from data.peerId if forwarded, or from the direct sender)
-                const senderId = data.peerId || peerId;
-                const senderName = state.peers[senderId] ? 
-                                 state.peers[senderId].name : 'Unknown User';
-                
-                // Handle chat message
-                if (data.message && window.MentalPlayer && window.MentalPlayer.addChatMessage) {
-                    window.MentalPlayer.addChatMessage(senderId, senderName, data.message);
+                // Find the correct sender ID (could be senderId or peerId depending on how it was forwarded)
+                let actualSenderId = data.senderId || data.peerId || peerId;
+    
+                // Get sender name
+                let senderName = 'Unknown User';
+                if (state.peers[actualSenderId]) {
+                    senderName = state.peers[actualSenderId].name;
                 }
-                
+    
+                console.log(`[Connection] Processing chat message from ${senderName} (${actualSenderId}): ${data.message}`);
+    
+                // Handle chat message display
+                if (data.message && window.MentalPlayer && window.MentalPlayer.addChatMessage) {
+                    // Call the UI function with the correct parameters
+                    window.MentalPlayer.addChatMessage(actualSenderId, senderName, data.message);
+                }
+    
                 // If we're the host, forward the message to all other peers
                 if (state.isHost) {
-                    // Make sure we're preserving the original sender ID
                     broadcastToPeers({
                         type: 'chat_message',
-                        peerId: senderId, // Important: Include original sender ID
+                        // Include original sender info in forwarded message
+                        senderId: actualSenderId,
                         message: data.message
                     }, [peerId]); // Exclude the sender
                 }
